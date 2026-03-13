@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: orion-newspaper
+  name: orion-newspaper
+  namespace: orion-newspaper
+spec:
+  ports:
+  - name: http
+    port: 8501
+    protocol: TCP
+    targetPort: 8501
+  selector:
+    app.kubernetes.io/instance: orion-newspaper
+    app.kubernetes.io/name: orion-newspaper
+  type: ClusterIP

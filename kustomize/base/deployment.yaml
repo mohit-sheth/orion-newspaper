@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: orion-newspaper
+  name: orion-newspaper
+  namespace: orion-newspaper
+  annotations:
+    image.openshift.io/triggers: |
+      [
+        {
+          "from": {
+            "kind": "ImageStreamTag",
+            "name": "orion-newspaper:latest",
+            "namespace": "orion-newspaper"
+          },
+          "fieldPath": "spec.template.spec.containers[?(@.name==\"orion-newspaper\")].image"
+        }
+      ]
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: orion-newspaper
+      app.kubernetes.io/name: orion-newspaper
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: orion-newspaper
+        app.kubernetes.io/name: orion-newspaper
+    spec:
+      containers:
+      - image: orion-newspaper:latest
+        imagePullPolicy: Always
+        name: orion-newspaper
+        envFrom:
+        - secretRef:
+            name: orion-newspaper-env
+        ports:
+        - containerPort: 8501
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1.5Gi"
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 90

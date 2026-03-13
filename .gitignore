@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+kustomize/base/.env
+kustomize/**/.env
+.streamlit/secrets.toml
+orion_run_*
+.pytest_cache/
+.coverage
+htmlcov/

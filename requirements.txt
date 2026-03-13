@@ -1,0 +1,5 @@
+streamlit>=1.36.0
+pandas>=2.0.0
+pyyaml>=6.0
+streamlit-autorefresh>=1.0.1
+streamlit-ace>=0.1.1
