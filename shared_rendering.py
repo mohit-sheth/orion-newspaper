@@ -4,7 +4,7 @@ from html import escape as _esc
 import streamlit as st
 import streamlit.components.v1 as components
 
-from orion_runner import parse_csv_data, find_viz_html, extract_regressions
+from orion_runner import parse_csv_data, find_viz_html, extract_regressions_json, DEFAULT_BENCHMARK_INDEX, DEFAULT_METADATA_INDEX
 
 APP_CSS = """
 <style>
@@ -88,6 +88,7 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 }
 .status-success { background: linear-gradient(135deg, #0d2818, #132e1c); color: #4ade80; border-color: #1a4028; }
 .status-regression { background: linear-gradient(135deg, #2a1a00, #332200); color: #fbbf24; border-color: #4a3000; }
+.status-nodata { background: linear-gradient(135deg, #0a1a2a, #102030); color: #60a5fa; border-color: #1a3050; }
 .status-error { background: linear-gradient(135deg, #2a0a0a, #331010); color: #f87171; border-color: #4a1a1a; }
 
 .config-preview {
@@ -108,29 +109,38 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 }
 .config-preview .value { color: #c0c0d0; margin-bottom: 0.4rem; }
 
-.regression-card {
+.regression-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+.regression-table tr {
     background-color: #16161f;
-    border-left: 3px solid #fbbf24;
-    border-radius: 8px;
-    padding: 0.7rem 1.2rem;
-    margin-bottom: 0.6rem;
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
 }
-.regression-card .ver {
-    color: #e0e0ed;
-    font-family: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', monospace;
-    font-size: 0.82rem;
-    font-weight: 500;
+.regression-table tr:hover {
+    background-color: #1a1a28;
 }
-.regression-card .arrow { color: #fbbf24; font-size: 1.2rem; }
-.regression-card .label-text {
+.regression-table th {
     color: #6c6c80;
     font-size: 0.65rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+    padding: 0.5rem 0.8rem;
+    text-align: left;
+    border-bottom: 1px solid #2a2a3a;
+}
+.regression-table td {
+    color: #e0e0ed;
+    font-family: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', monospace;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid #1e1e2a;
+    white-space: nowrap;
+}
+.regression-table td:first-child {
+    border-left: 3px solid #fbbf24;
 }
 
 .summary-row { display: flex; gap: 1rem; margin-bottom: 1.4rem; flex-wrap: wrap; }
@@ -234,17 +244,25 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 .run-meta .val { color: #b0b0c0; }
 
 /* Newspaper grid */
+/* Card containers — heat signature tint */
+.np-card {
+    border: 1px solid #2a2a3a;
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.4rem;
+}
+.np-card-pass { background-color: rgba(74, 222, 128, 0.04); border-color: rgba(74, 222, 128, 0.12); }
+.np-card-regression { background-color: rgba(251, 191, 36, 0.06); border-color: rgba(251, 191, 36, 0.15); }
+.np-card-error { background-color: rgba(248, 113, 113, 0.06); border-color: rgba(248, 113, 113, 0.15); }
+.np-card-nodata { background-color: rgba(96, 165, 250, 0.04); border-color: rgba(96, 165, 250, 0.12); }
+.np-card-pending { background-color: #16161f; border-color: #2a2a3a; }
+
 .np-card-name {
     color: #e0e0ed;
     font-size: 0.88rem;
     font-weight: 600;
     margin-bottom: 0.5rem;
     word-break: break-word;
-}
-.np-card-time {
-    color: #6c6c80;
-    font-size: 0.72rem;
-    margin-bottom: 0.4rem;
 }
 .np-status {
     display: inline-block;
@@ -258,11 +276,37 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 .np-status-green { background-color: #0d2818; color: #4ade80; border-color: #1a4028; }
 .np-status-yellow { background-color: #2a1a00; color: #fbbf24; border-color: #4a3000; }
 .np-status-red { background-color: #2a0a0a; color: #f87171; border-color: #4a1a1a; }
+.np-status-blue { background-color: #0a1a2a; color: #60a5fa; border-color: #1a3050; }
 .np-status-gray { background-color: #1a1a24; color: #6c6c80; border-color: #2a2a3a; }
 .np-card-summary {
-    color: #6c6c80;
-    font-size: 0.7rem;
+    color: #8c8ca0;
+    font-size: 0.8rem;
     margin-top: 0.5rem;
+}
+.np-card-regressions {
+    display: inline-block;
+}
+.np-card-regressions summary { list-style: none; }
+.np-card-regressions summary::-webkit-details-marker { display: none; }
+.np-card-regressions[open] > summary { margin-bottom: 0.3rem; }
+.np-card-regressions[open] .np-card-reg-item:first-child {
+    padding-top: 0.2rem;
+    border-top: 1px solid #2a2200;
+}
+.np-card-reg-item {
+    font-family: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', monospace;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.05rem 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.np-card-reg-item .metric-name {
+    color: #b0b0c0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Metric correlation matrix */
@@ -326,24 +370,155 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 OCP_VERSIONS = ["4.18", "4.19", "4.20", "4.21", "4.22", "4.23", "5.0"]
 OCP_VERSION_DEFAULT_INDEX = 4
 LOOKBACK_OPTIONS = ["7d", "15d", "30d", "60d", "Custom"]
-DEFAULT_BENCHMARK_INDEX = "ripsaw-kube-burner-*"
-DEFAULT_METADATA_INDEX = "perf_scale_ci*"
 
 CATEGORIES = [
     {
         "name": "Core",
-        "configs": [
-            "trt-external-payload-cluster-density.yaml",
-            "trt-external-payload-node-density.yaml",
-            "trt-external-payload-node-density-cni.yaml",
-            "trt-external-payload-udn-l2.yaml",
-            "metal-perfscale-cpt-virt-density.yaml",
+        "subcategories": [
+            {
+                "name": "6 nodes (TRT payload)",
+                "prefix": "trt-external-payload-",
+                "configs": [
+                    "trt-external-payload-cluster-density.yaml",
+                    "trt-external-payload-node-density.yaml",
+                    "trt-external-payload-node-density-cni.yaml",
+                    "trt-external-payload-udn-l2.yaml",
+                ],
+            },
+            {
+                "name": "24 nodes (small scale)",
+                "prefix": "small-scale-",
+                "configs": [
+                    "small-scale-cluster-density.yaml",
+                    "small-scale-node-density-cni.yaml",
+                    "small-scale-udn-l3.yaml",
+                ],
+            },
+            {
+                "name": "120 nodes (med scale)",
+                "prefix": "med-scale-",
+                "configs": [
+                    "med-scale-udn-l2.yaml",
+                ],
+            },
+            {
+                "name": "252 nodes (large scale)",
+                "prefix": "large-scale-",
+                "configs": [
+                    "large-scale-udn-l2.yaml",
+                ],
+            },
         ],
     },
-    {"name": "Virt", "configs": ["trt-external-payload-node-density.yaml"]},
+    {"name": "Virt", "configs": ["metal-perfscale-cpt-virt-density.yaml"]},
     {"name": "Telco", "configs": ["trt-external-payload-node-density.yaml"]},
     {"name": "HCP", "configs": ["trt-external-payload-node-density.yaml"]},
 ]
+
+
+def _all_configs_for_category(cat: dict) -> list[str]:
+    """Return flat list of all configs in a category (handles subcategories)."""
+    if "subcategories" in cat:
+        return [c for sub in cat["subcategories"] for c in sub["configs"]]
+    return cat.get("configs", [])
+
+
+def filtered_categories(available_configs: set) -> list[dict]:
+    """Return CATEGORIES filtered to only include available configs, excluding empties."""
+    result = []
+    for cat in CATEGORIES:
+        if "subcategories" in cat:
+            subs = []
+            for sub in cat["subcategories"]:
+                filtered = [c for c in sub["configs"] if c in available_configs]
+                if filtered:
+                    entry = {"name": sub["name"], "configs": filtered}
+                    if "prefix" in sub:
+                        entry["prefix"] = sub["prefix"]
+                    subs.append(entry)
+            if subs:
+                result.append({"name": cat["name"], "subcategories": subs})
+        else:
+            filtered = [c for c in cat["configs"] if c in available_configs]
+            if filtered:
+                result.append({"name": cat["name"], "configs": filtered})
+    return result
+
+
+def display_name(config_name: str, strip_prefix: str = "") -> str:
+    """Strip .yaml extension and optional prefix for display."""
+    name = config_name.replace(".yaml", "")
+    if strip_prefix and name.startswith(strip_prefix):
+        name = name[len(strip_prefix):]
+    return name
+
+
+def format_duration(seconds: float) -> str:
+    """Format seconds as 'Xm Ys' or 'Ys'."""
+    mins, secs = divmod(int(seconds), 60)
+    return f"{mins}m {secs}s" if mins else f"{secs}s"
+
+
+def is_container() -> bool:
+    """Detect if running inside a container."""
+    return os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
+
+
+STATUS_MAP = {
+    None: {"pill": "np-status-gray", "badge": "status-error", "card": "np-card-pending", "label": "Pending"},
+    0:    {"pill": "np-status-green", "badge": "status-success", "card": "np-card-pass", "label": "Pass"},
+    2:    {"pill": "np-status-yellow", "badge": "status-regression", "card": "np-card-regression", "label": "Regression"},
+    3:    {"pill": "np-status-blue", "badge": "status-nodata", "card": "np-card-nodata", "label": "No Data"},
+}
+_ERROR_STATUS = {"pill": "np-status-red", "badge": "status-error", "card": "np-card-error"}
+
+
+def _status_info(return_code):
+    """Return full status dict for a return code."""
+    info = STATUS_MAP.get(return_code)
+    if info:
+        return info
+    return {**_ERROR_STATUS, "label": f"Error ({return_code})"}
+
+
+def _format_value(v):
+    """Format a metric value for display."""
+    if isinstance(v, float):
+        return f"{v:.2f}"
+    return str(v) if v != "" else "?"
+
+
+def render_regression_table(regressions, show_config=False):
+    """Render regressions as an aligned table. Set show_config=True for executive summary."""
+    if not regressions:
+        return
+    config_th = '<th>Config</th>' if show_config else ''
+    rows = ""
+    for reg in regressions:
+        pct = reg.get("percentage_change", 0)
+        pct_str = f"+{pct:.1f}%" if pct > 0 else f"{pct:.1f}%"
+        pct_cls = "color: #f87171" if abs(pct) >= 25 else "color: #fbbf24"
+        prev_val = _format_value(reg.get("prev_value", ""))
+        bad_val = _format_value(reg.get("bad_value", ""))
+        tooltip = f"{prev_val} → {bad_val}"
+        config_td = f'<td>{_esc(reg.get("config", ""))}</td>' if show_config else ''
+        rows += (
+            f'<tr>'
+            f'{config_td}'
+            f'<td>{_esc(reg.get("metric", ""))}</td>'
+            f'<td style="{pct_cls}; cursor: help;" title="{_esc(tooltip)}">{_esc(pct_str)}</td>'
+            f'<td>{_esc(reg.get("prev_ver", ""))}</td>'
+            f'<td style="color: #fbbf24;">&rarr;</td>'
+            f'<td>{_esc(reg.get("bad_ver", ""))}</td>'
+            f'</tr>'
+        )
+    st.markdown(
+        f'<table class="regression-table">'
+        f'<thead><tr>{config_th}<th>Metric</th><th>Change</th>'
+        f'<th>Previous</th><th></th><th>Bad</th></tr></thead>'
+        f'<tbody>{rows}</tbody></table>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_lookback(default_index=1, key_prefix=""):
@@ -371,9 +546,8 @@ def render_header():
 
 def render_es_status():
     es_server = os.environ.get("ES_SERVER", "")
-    _mode = "container" if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv") else "local"
     if es_server:
-        _mode_label = "Local-Dev" if _mode == "local" else "Container"
+        _mode_label = "Container" if is_container() else "Local-Dev"
         st.markdown(
             f'<div class="es-connected"><span class="es-dot"></span> ES connected</div>'
             f'<div class="es-connected">Mode: {_mode_label}</div>',
@@ -402,12 +576,11 @@ def render_results(return_code, full_output, temp_dir, n_metrics, run_duration, 
     with tab_results:
         col_status, col_toggle = st.columns([4, 1])
         with col_status:
-            if return_code == 0:
-                st.markdown('<div class="status-badge status-success">No regressions detected</div>', unsafe_allow_html=True)
-            elif return_code == 2:
-                st.markdown('<div class="status-badge status-regression">Regression(s) detected</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="status-badge status-error">Error (exit code {int(return_code)})</div>', unsafe_allow_html=True)
+            info = _status_info(return_code)
+            st.markdown(
+                f'<div class="status-badge {info["badge"]}">{_esc(info["label"])}</div>',
+                unsafe_allow_html=True,
+            )
         with col_toggle:
             label = "Collapse All" if st.session_state[expand_key] else "Expand All"
             if st.button(label, use_container_width=True, key=f"toggle_{expand_key}"):
@@ -415,24 +588,20 @@ def render_results(return_code, full_output, temp_dir, n_metrics, run_duration, 
                 st.rerun()
 
         if run_duration is not None:
-            mins, secs = divmod(int(run_duration), 60)
-            dur_str = f"{mins}m {secs}s" if mins else f"{secs}s"
             st.markdown(
-                f'<div class="run-meta">Completed at <span class="val">{_esc(str(run_finished))}</span> in <span class="val">{_esc(dur_str)}</span></div>',
+                f'<div class="run-meta">Completed at <span class="val">{_esc(str(run_finished))}</span> in <span class="val">{_esc(format_duration(run_duration))}</span></div>',
                 unsafe_allow_html=True,
             )
 
-        regressions = extract_regressions(full_output) if return_code == 2 else []
+        regressions = extract_regressions_json(temp_dir) if return_code == 2 else []
         csv_results = parse_csv_data(temp_dir) if temp_dir else []
         total_runs = sum(len(df) for _, df in csv_results)
-        n_changepoints = full_output.count("··························")
         reg_cls = " summary-card-alert" if regressions else ""
 
         st.markdown(
             f'<div class="summary-row">'
             f'<div class="summary-card"><div class="num">{total_runs}</div><div class="lbl">Runs analyzed</div></div>'
             f'<div class="summary-card"><div class="num">{n_metrics}</div><div class="lbl">Metrics</div></div>'
-            f'<div class="summary-card"><div class="num">{n_changepoints}</div><div class="lbl">Changepoints</div></div>'
             f'<div class="summary-card{reg_cls}"><div class="num">{len(regressions)}</div><div class="lbl">Regressions</div></div>'
             f'</div>',
             unsafe_allow_html=True,
@@ -440,22 +609,14 @@ def render_results(return_code, full_output, temp_dir, n_metrics, run_duration, 
 
         if regressions:
             with st.expander("Regressions", expanded=expand):
-                for reg in regressions:
-                    st.markdown(
-                        f'<div class="regression-card">'
-                        f'<div><div class="label-text">Previous</div><div class="ver">{_esc(reg["prev_ver"])}</div></div>'
-                        f'<div class="arrow">&rarr;</div>'
-                        f'<div><div class="label-text">Bad</div><div class="ver">{_esc(reg["bad_ver"])}</div></div>'
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
+                render_regression_table(regressions)
 
         viz_files = find_viz_html(temp_dir) if temp_dir else []
         if viz_files:
             with st.expander("Visualizations", expanded=expand):
                 for viz_file in viz_files:
                     viz_name = os.path.basename(viz_file).replace("_viz.html", "")
-                    st.markdown(f"**{viz_name}**")
+                    st.markdown(f"**{_esc(viz_name)}**")
                     with open(viz_file, "r") as f:
                         html_content = _scrub(f.read())
                     n_plots = html_content.count('"yaxis')
@@ -465,18 +626,12 @@ def render_results(return_code, full_output, temp_dir, n_metrics, run_duration, 
         if csv_results:
             with st.expander("Data", expanded=expand):
                 for name, df in csv_results:
-                    st.markdown(f"**{name}**")
+                    st.markdown(f"**{_esc(name)}**")
                     st.dataframe(df, use_container_width=True, height=400)
 
         if not csv_results and not viz_files:
             st.info("No data files or visualizations were generated. Check the Logs tab for details.")
 
     with tab_logs:
-        output_file = os.path.join(temp_dir, "output.txt") if temp_dir else None
-        if output_file and os.path.exists(output_file):
-            with open(output_file) as f:
-                formatted = f.read()
-            st.code(_scrub(formatted), language=None)
         if full_output:
-            with st.expander("Raw stdout", expanded=not (output_file and os.path.exists(output_file))):
-                st.code(_scrub(full_output), language=None)
+            st.code(_scrub(full_output), language=None)

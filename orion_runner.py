@@ -24,6 +24,9 @@ ORION_RUN_TIMEOUT = int(os.environ.get("ORION_RUN_TIMEOUT", "600"))
 # limit. For the current scale (~5 users) this is acceptable.
 ORION_LOCK_FILE = os.environ.get("ORION_LOCK_FILE", "/tmp/orion_run.lock")
 
+DEFAULT_BENCHMARK_INDEX = "ripsaw-kube-burner-*"
+DEFAULT_METADATA_INDEX = "perf_scale_ci*"
+
 ALGORITHM_FLAGS: dict[str, str] = {
     "hunter-analyze": "--hunter-analyze",
     "anomaly-detection": "--anomaly-detection",
@@ -119,8 +122,6 @@ def build_command(params: dict[str, Any]) -> tuple[list[str], dict[str, str], st
     input_vars = {}
     if params.get("version"):
         input_vars["version"] = params["version"]
-    if params.get("extra_input_vars"):
-        input_vars.update(params["extra_input_vars"])
     if input_vars:
         cmd.extend(["--input-vars", json.dumps(input_vars)])
 
@@ -143,6 +144,7 @@ def build_command(params: dict[str, Any]) -> tuple[list[str], dict[str, str], st
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/root"),
         "PYTHONUNBUFFERED": "1",
+        "PROW_JOB_ID": "orion-newspaper",
     }
     # ES_SERVER is always read from the process environment, never from user params
     es_server = os.environ.get("ES_SERVER", "")
@@ -165,12 +167,12 @@ def humanize_command(cmd: list[str]) -> str:
             continue
         if arg == cmd[0]:
             parts.append("orion")
-        elif arg == "--config":
+        elif arg == "--config" and i + 1 < len(cmd):
             skip_next = True
             parts.append(f"--config {os.path.basename(cmd[i + 1])}")
         elif arg in ("--save-output-path", "--save-data-path"):
             skip_next = True
-        elif arg == "--input-vars":
+        elif arg == "--input-vars" and i + 1 < len(cmd):
             skip_next = True
             parts.append(f"--input-vars '{cmd[i + 1]}'")
         elif arg == "--viz":
@@ -319,25 +321,61 @@ def find_viz_html(temp_dir: str) -> list[str]:
     return sorted(glob.glob(os.path.join(temp_dir, "*_viz.html")))
 
 
-def extract_regressions(raw_output: str) -> list[dict[str, str]]:
-    regressions = []
-    lines = raw_output.split("\n")
-    i = 0
-    while i < len(lines):
-        if "Regression(s) found" in lines[i]:
-            prev_ver = None
-            bad_ver = None
-            for j in range(i + 1, min(i + 20, len(lines))):
-                line = lines[j]
-                match_prev = re.match(r"\s*Previous Version:\s*(.*)", line)
-                match_bad = re.match(r"\s*Bad Version:\s*(.*)", line)
-                if match_prev:
-                    prev_ver = match_prev.group(1).strip()
-                if match_bad:
-                    bad_ver = match_bad.group(1).strip()
-                if prev_ver and bad_ver:
-                    regressions.append({"prev_ver": prev_ver, "bad_ver": bad_ver})
-                    prev_ver = None
-                    bad_ver = None
-        i += 1
+def extract_regressions_json(temp_dir: str) -> list[dict[str, Any]]:
+    """Parse saved JSON output files to extract rich regression data.
+
+    Returns list of dicts with keys:
+        test_name, metric, percentage_change, prev_value, bad_value, prev_ver, bad_ver
+    """
+    if not temp_dir:
+        return []
+
+    json_files = sorted(glob.glob(os.path.join(temp_dir, "output_*.json")))
+    regressions: list[dict[str, Any]] = []
+
+    for json_file in json_files:
+        # Test name is encoded in the filename: output_<testname>.json
+        basename = os.path.basename(json_file)
+        test_name = re.sub(r"^output_", "", basename).replace(".json", "")
+
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+        except Exception:
+            logger.warning("Failed to parse JSON %s", json_file, exc_info=True)
+            continue
+
+        if not isinstance(data, list):
+            continue
+
+        # Walk through data points looking for changepoints
+        prev_entry = None
+        for entry in data:
+            if entry.get("is_changepoint"):
+                metrics = entry.get("metrics", {})
+                for metric_name, metric_data in metrics.items():
+                    pct = metric_data.get("percentage_change", 0)
+                    if pct == 0:
+                        continue
+                    bad_ver = entry.get("ocpVersion", entry.get("build", ""))
+                    bad_value = metric_data.get("value", "")
+                    prev_ver = ""
+                    prev_value = ""
+                    if prev_entry:
+                        prev_ver = prev_entry.get("ocpVersion", prev_entry.get("build", ""))
+                        prev_metric = prev_entry.get("metrics", {}).get(metric_name, {})
+                        prev_value = prev_metric.get("value", "")
+                    regressions.append({
+                        "test_name": test_name,
+                        "metric": metric_name,
+                        "percentage_change": round(pct, 2),
+                        "prev_value": prev_value,
+                        "bad_value": bad_value,
+                        "prev_ver": str(prev_ver),
+                        "bad_ver": str(bad_ver),
+                    })
+            prev_entry = entry
+
+    # Sort by absolute percentage change descending (most severe first)
+    regressions.sort(key=lambda r: abs(r["percentage_change"]), reverse=True)
     return regressions

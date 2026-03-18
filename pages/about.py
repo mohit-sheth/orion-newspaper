@@ -3,7 +3,7 @@ import os
 import streamlit as st
 
 from orion_runner import ORION_DIR, ORION_BIN, ORION_EXAMPLES_DIR, discover_configs
-from shared_rendering import render_css, render_header, OCP_VERSIONS
+from shared_rendering import render_css, render_header, is_container, OCP_VERSIONS
 
 render_css()
 render_header()
@@ -11,7 +11,7 @@ render_header()
 st.subheader("About")
 
 # --- Mode ---
-_mode = "Container" if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv") else "Local-Dev"
+_mode = "Container" if is_container() else "Local-Dev"
 
 # --- Orion version ---
 orion_version = "installed" if os.path.isfile(ORION_BIN) else "not found"
@@ -43,14 +43,14 @@ st.markdown(
 
 st.markdown("### Newspaper defaults")
 st.markdown(
-    "The Newspaper page monitors configs in 4 categories. "
-    "Each category runs with **hunter-analyze** algorithm. "
-    "Auto-refreshes every **15 minutes**."
+    "The Newspaper page monitors configs across categories with subcategories by node scale. "
+    "Each config runs with **hunter-analyze** algorithm. "
+    "Auto-refreshes every **2 hours**."
 )
 st.markdown(
     "| Category | Description |\n"
     "|---|---|\n"
-    "| Core | Cluster density, node density, CNI, UDN L2, virt density |\n"
+    "| Core | Cluster density, node density, CNI, UDN — grouped by 6/24/120/252 nodes |\n"
     "| Virt | Virtualization workloads |\n"
     "| Telco | Telco-specific workloads |\n"
     "| HCP | Hosted Control Plane workloads |"

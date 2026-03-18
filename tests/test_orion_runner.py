@@ -7,7 +7,7 @@ from orion_runner import (
     build_command,
     humanize_command,
     _parse_log_message,
-    extract_regressions,
+    extract_regressions_json,
     discover_configs,
     get_config_metadata,
     get_config_metrics,
@@ -88,6 +88,7 @@ def test_build_command_env(tmp_path, monkeypatch):
     assert env["es_benchmark_index"] == "ripsaw-*"
     assert env["es_metadata_index"] == "perf_ci*"
     assert env["PYTHONUNBUFFERED"] == "1"
+    assert env["PROW_JOB_ID"] == "orion-newspaper"
 
 
 def test_build_command_env_no_es_server(tmp_path, monkeypatch):
@@ -135,30 +136,57 @@ def test_parse_log_message():
     assert _parse_log_message("") is None
 
 
-# --- test_extract_regressions ---
+# --- test_extract_regressions_json ---
 
-def test_extract_regressions():
-    assert extract_regressions("All good\nNo issues") == []
+def test_extract_regressions_json_empty():
+    assert extract_regressions_json(None) == []
+    assert extract_regressions_json("/nonexistent") == []
 
-    output = (
-        "Some output\n"
-        "Regression(s) found\n"
-        "  Previous Version: 4.17.0\n"
-        "  Bad Version: 4.18.0\n"
-        "More output\n"
-    )
-    result = extract_regressions(output)
+
+def test_extract_regressions_json(tmp_path):
+    data = [
+        {"ocpVersion": "4.17", "is_changepoint": False,
+         "metrics": {"podReadyLatency": {"value": 80.0, "percentage_change": 0}}},
+        {"ocpVersion": "4.18", "is_changepoint": True,
+         "metrics": {"podReadyLatency": {"value": 105.0, "percentage_change": 31.25}}},
+        {"ocpVersion": "4.19", "is_changepoint": False,
+         "metrics": {"podReadyLatency": {"value": 106.0, "percentage_change": 0}}},
+    ]
+    (tmp_path / "output_my-test.json").write_text(json.dumps(data))
+
+    result = extract_regressions_json(str(tmp_path))
     assert len(result) == 1
-    assert result[0] == {"prev_ver": "4.17.0", "bad_ver": "4.18.0"}
+    assert result[0]["test_name"] == "my-test"
+    assert result[0]["metric"] == "podReadyLatency"
+    assert result[0]["percentage_change"] == 31.25
+    assert result[0]["prev_value"] == 80.0
+    assert result[0]["bad_value"] == 105.0
+    assert result[0]["prev_ver"] == "4.17"
+    assert result[0]["bad_ver"] == "4.18"
 
-    multi = (
-        "Regression(s) found\n"
-        "  Previous Version: 4.16\n"
-        "  Bad Version: 4.17\n"
-        "  Previous Version: 4.17\n"
-        "  Bad Version: 4.18\n"
-    )
-    assert len(extract_regressions(multi)) == 2
+
+def test_extract_regressions_json_multiple_metrics(tmp_path):
+    data = [
+        {"ocpVersion": "4.20", "is_changepoint": False,
+         "metrics": {
+             "cpu": {"value": 10, "percentage_change": 0},
+             "memory": {"value": 200, "percentage_change": 0},
+         }},
+        {"ocpVersion": "4.21", "is_changepoint": True,
+         "metrics": {
+             "cpu": {"value": 15, "percentage_change": 50.0},
+             "memory": {"value": 210, "percentage_change": 5.0},
+         }},
+    ]
+    (tmp_path / "output_perf-test.json").write_text(json.dumps(data))
+
+    result = extract_regressions_json(str(tmp_path))
+    assert len(result) == 2
+    # Sorted by absolute percentage change descending
+    assert result[0]["metric"] == "cpu"
+    assert result[0]["percentage_change"] == 50.0
+    assert result[1]["metric"] == "memory"
+    assert result[1]["percentage_change"] == 5.0
 
 
 # --- test_discover_and_metadata ---

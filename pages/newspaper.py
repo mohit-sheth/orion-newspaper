@@ -10,27 +10,23 @@ from streamlit_autorefresh import st_autorefresh
 from orion_runner import (
     build_command, run_orion, create_temp_dir, humanize_command,
     discover_configs, get_config_path, get_config_metadata,
+    extract_regressions_json, parse_csv_data,
 )
 from shared_rendering import (
     render_css, render_header, render_es_status, render_results, render_lookback,
+    _status_info, filtered_categories, _all_configs_for_category,
+    display_name, format_duration,
     OCP_VERSIONS, OCP_VERSION_DEFAULT_INDEX,
     DEFAULT_BENCHMARK_INDEX, DEFAULT_METADATA_INDEX,
-    CATEGORIES,
 )
 
 render_css()
 render_header()
 
-available_configs = set(discover_configs())
-
-# Build a working copy of categories filtered to available configs (don't mutate the shared constant)
-categories = [
-    {"name": cat["name"], "configs": [c for c in cat["configs"] if c in available_configs]}
-    for cat in CATEGORIES
-]
+categories = filtered_categories(set(discover_configs()))
 
 # Deduplicated list of all configs across categories
-all_monitored = list(dict.fromkeys(c for cat in categories for c in cat["configs"]))
+all_monitored = list(dict.fromkeys(c for cat in categories for c in _all_configs_for_category(cat)))
 
 # --- Session state ---
 if "np_results" not in st.session_state:
@@ -45,8 +41,8 @@ else:
 if "np_last_poll_time" not in st.session_state:
     st.session_state["np_last_poll_time"] = 0
 
-# --- Auto-refresh (15 min) ---
-refresh_count = st_autorefresh(interval=900_000, limit=None, key="np_autorefresh")
+# --- Auto-refresh (2 hours) ---
+st_autorefresh(interval=7_200_000, limit=None, key="np_autorefresh")
 
 # --- Sidebar ---
 with st.sidebar:
@@ -66,9 +62,7 @@ with st.sidebar:
 
     last_poll = st.session_state["np_last_poll_time"]
     if last_poll > 0:
-        ago = int(time.time() - last_poll)
-        mins, secs = divmod(ago, 60)
-        st.caption(f"Last refresh: {mins}m {secs}s ago")
+        st.caption(f"Last refresh: {datetime.fromtimestamp(last_poll).strftime('%H:%M:%S')}")
 
 
 # --- Run all monitored configs ---
@@ -111,7 +105,7 @@ def _run_all(monitored_configs, version, lookback):
             self._bar.progress(pct_overall, text=f"{self._pos} {self._display} · {metric}")
 
     for i, config_name in enumerate(monitored_configs):
-        display = config_name.replace(".yaml", "")
+        display = display_name(config_name)
         pos = f"({i+1}/{len(monitored_configs)})"
         overall.progress(metrics_done / max(total_metrics, 1),
                          text=f"{pos} {display}")
@@ -146,24 +140,34 @@ def _run_all(monitored_configs, version, lookback):
             elapsed = time.monotonic() - t0
             n_metrics = sum(1 for _, msg in log_messages if "Collecting " in msg)
 
+            regressions = extract_regressions_json(temp_dir) if return_code == 2 else []
+            csv_results = parse_csv_data(temp_dir)
+            n_runs = sum(len(df) for _, df in csv_results)
             results[config_name] = {
                 "return_code": return_code,
                 "full_output": full_output,
-                "n_metrics": n_metrics,
+                "n_metrics": config_metric_counts.get(config_name, n_metrics),
+                "n_runs": n_runs,
                 "temp_dir": temp_dir,
                 "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "duration": elapsed,
                 "cmd_display": cmd_display,
+                "regressions": regressions,
             }
         except Exception as e:
             shutil.rmtree(temp_dir, ignore_errors=True)
+            _es = os.environ.get("ES_SERVER", "")
+            sanitized = str(e).replace(_es, "***") if _es else str(e)
             results[config_name] = {
                 "return_code": -1,
-                "full_output": str(e),
+                "full_output": sanitized,
                 "n_metrics": 0,
+                "n_runs": 0,
                 "temp_dir": None,
                 "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "duration": 0,
+                "cmd_display": "",
+                "regressions": [],
             }
 
         metrics_done += config_metric_counts.get(config_name, 0)
@@ -178,7 +182,7 @@ def _run_all(monitored_configs, version, lookback):
 auto_trigger = False
 if st.session_state["np_last_poll_time"] > 0 and all_monitored:
     elapsed = time.time() - st.session_state["np_last_poll_time"]
-    if elapsed >= 870:  # ~14.5 min, slightly under the 15 min interval
+    if elapsed >= 7_100:  # ~1h58m, slightly under the 2 hour interval
         auto_trigger = True
 
 if (refresh_clicked or auto_trigger) and all_monitored and not st.session_state["np_is_running"]:
@@ -189,41 +193,62 @@ if (refresh_clicked or auto_trigger) and all_monitored and not st.session_state[
 # --- Helper: find category for a config ---
 def _find_category(config_name):
     for cat in categories:
-        if config_name in cat["configs"]:
+        if config_name in _all_configs_for_category(cat):
             return cat["name"]
     return None
 
 
 # --- Helper: render a card ---
-def _status_for_return_code(return_code):
-    """Map orion return code to (css_class, label)."""
-    if return_code is None:
-        return "np-status-gray", "Pending"
-    if return_code == 0:
-        return "np-status-green", "OK"
-    if return_code == 2:
-        return "np-status-yellow", "Regression"
-    return "np-status-red", f"Error ({return_code})"
-
-
-def _render_card(config_name, result, key_suffix=""):
-    display_name = config_name.replace(".yaml", "")
+def _render_card(config_name, result, key_suffix="", strip_prefix=""):
+    dn = display_name(config_name, strip_prefix)
 
     rc = result["return_code"] if result else None
-    status_cls, status_text = _status_for_return_code(rc)
-    time_text = result["last_run"] if result else "--"
+    info = _status_info(rc)
+    status_cls = info["pill"]
+    status_text = info["label"]
+    card_cls = info["card"]
 
     summary = ""
+    items = ""
     if result and result["return_code"] is not None:
-        mins, secs = divmod(int(result.get("duration", 0)), 60)
-        dur = f"{mins}m {secs}s" if mins else f"{secs}s"
-        summary = f'<div class="np-card-summary">{result.get("n_metrics", 0)} metrics &middot; {dur}</div>'
+        dur = format_duration(result.get("duration", 0))
+        n_metrics = result.get("n_metrics", 0)
+        n_runs = result.get("n_runs", 0)
+        parts = []
+        if n_runs:
+            parts.append(f"{n_runs} runs")
+        parts.append(f"{n_metrics} metrics")
+        parts.append(dur)
+        summary = f'<div class="np-card-summary">{" &middot; ".join(parts)}</div>'
+
+        for reg in result.get("regressions", []):
+            pct = reg.get("percentage_change", 0)
+            pct_str = f"+{pct:.1f}%" if pct > 0 else f"{pct:.1f}%"
+            pct_color = "#f87171" if abs(pct) >= 25 else "#fbbf24"
+            items += (
+                f'<div class="np-card-reg-item">'
+                f'<span class="metric-name">{_esc(reg.get("metric", ""))}</span>'
+                f'<span style="color: {pct_color};">{_esc(pct_str)}</span>'
+                f'</div>'
+            )
+
+    # For regression cards, the status badge itself is the dropdown trigger
+    if items:
+        status_html = (
+            f'<details class="np-card-regressions">'
+            f'<summary class="np-status {status_cls}" style="cursor:pointer;">{_esc(status_text)}</summary>'
+            f'{items}'
+            f'</details>'
+        )
+    else:
+        status_html = f'<div class="np-status {status_cls}">{_esc(status_text)}</div>'
 
     st.markdown(
-        f'<div class="np-card-name">{_esc(display_name)}</div>'
-        f'<div class="np-card-time">{_esc(time_text)}</div>'
-        f'<div class="np-status {status_cls}">{_esc(status_text)}</div>'
-        f'{summary}',
+        f'<div class="np-card {card_cls}">'
+        f'<div class="np-card-name">{_esc(dn)}</div>'
+        f'{status_html}'
+        f'{summary}'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
@@ -243,8 +268,7 @@ if selected and selected in st.session_state["np_results"]:
         st.session_state["np_selected_config"] = None
         st.rerun()
 
-    display_name = selected.replace(".yaml", "")
-    st.subheader(f"{breadcrumb}{display_name}")
+    st.subheader(f"{breadcrumb}{display_name(selected)}")
 
     result = st.session_state["np_results"][selected]
     render_results(
@@ -265,11 +289,12 @@ else:
     elif not st.session_state["np_results"]:
         cat_sections = ""
         for cat in categories:
-            if not cat["configs"]:
+            cat_configs = _all_configs_for_category(cat)
+            if not cat_configs:
                 continue
             config_badges = "".join(
-                f'<span class="badge">{_esc(c.replace(".yaml", ""))}</span>'
-                for c in cat["configs"]
+                f'<span class="badge">{_esc(display_name(c))}</span>'
+                for c in cat_configs
             )
             cat_sections += (
                 f'<div style="margin-bottom: 0.6rem;">'
@@ -277,30 +302,46 @@ else:
                 f'<div style="margin-top: 0.3rem;">{config_badges}</div>'
                 f'</div>'
             )
+        non_empty = sum(1 for c in categories if _all_configs_for_category(c))
         st.markdown(
             '<div class="welcome-card">'
             '<h2>Newspaper</h2>'
             f'<p>Monitoring <span class="accent">{len(all_monitored)}</span> configs across '
-            f'{sum(1 for c in categories if c["configs"])} categories.</p>'
+            f'{non_empty} categories.</p>'
             '<hr class="divider">'
             f'{cat_sections}'
             '<hr class="divider">'
             '<p>Click <span class="accent">Refresh Now</span> to run all configs. '
-            'After the first run, auto-refresh kicks in every 15 minutes.</p>'
+            'After the first run, auto-refresh kicks in every 2 hours.</p>'
             '</div>',
             unsafe_allow_html=True,
         )
     else:
         results = st.session_state["np_results"]
-        cols_per_row = 3
+        cols_per_row = 4
 
         for cat in categories:
-            if not cat["configs"]:
+            cat_configs = _all_configs_for_category(cat)
+            if not cat_configs:
                 continue
+
             with st.expander(cat["name"], expanded=True):
-                for row_start in range(0, len(cat["configs"]), cols_per_row):
-                    row_configs = cat["configs"][row_start:row_start + cols_per_row]
-                    cols = st.columns(cols_per_row)
-                    for col, cfg in zip(cols, row_configs):
-                        with col:
-                            _render_card(cfg, results.get(cfg), key_suffix=cat["name"])
+                if "subcategories" in cat:
+                    for sub in cat["subcategories"]:
+                        if not sub["configs"]:
+                            continue
+                        prefix = sub.get("prefix", "")
+                        with st.expander(f":orange[{sub['name']}]", expanded=True):
+                            for row_start in range(0, len(sub["configs"]), cols_per_row):
+                                row_configs = sub["configs"][row_start:row_start + cols_per_row]
+                                cols = st.columns(cols_per_row)
+                                for col, cfg in zip(cols, row_configs):
+                                    with col:
+                                        _render_card(cfg, results.get(cfg), key_suffix=f"{cat['name']}_{sub['name']}", strip_prefix=prefix)
+                else:
+                    for row_start in range(0, len(cat["configs"]), cols_per_row):
+                        row_configs = cat["configs"][row_start:row_start + cols_per_row]
+                        cols = st.columns(cols_per_row)
+                        for col, cfg in zip(cols, row_configs):
+                            with col:
+                                _render_card(cfg, results.get(cfg), key_suffix=cat["name"])

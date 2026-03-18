@@ -17,6 +17,7 @@ st.set_page_config(page_title="Orion Newspaper", layout="wide", initial_sidebar_
 
 pg = st.navigation([
     st.Page("pages/newspaper.py", title="Newspaper", icon=":material/newspaper:", default=True),
+    st.Page("pages/executive_summary.py", title="Executive Summary", icon=":material/summarize:"),
     st.Page("pages/manual.py", title="Manual Execute", icon=":material/play_circle:"),
     st.Page("pages/metrics.py", title="Metric Correlation", icon=":material/analytics:"),
     st.Page("pages/about.py", title="About", icon=":material/info:"),

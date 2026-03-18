@@ -12,9 +12,10 @@ from orion_runner import (
 )
 from shared_rendering import (
     render_css, render_header, render_es_status, render_results, render_lookback,
+    _status_info, filtered_categories, _all_configs_for_category,
+    display_name, format_duration,
     OCP_VERSIONS, OCP_VERSION_DEFAULT_INDEX,
     DEFAULT_BENCHMARK_INDEX, DEFAULT_METADATA_INDEX,
-    CATEGORIES,
 )
 
 render_css()
@@ -28,24 +29,7 @@ class _NoOpTracker:
     def text(self, t):
         pass
 
-
-def _status_for_return_code(return_code):
-    """Map orion return code to (css_class, label)."""
-    if return_code is None:
-        return "np-status-gray", "—"
-    if return_code == 0:
-        return "np-status-green", "OK"
-    if return_code == 2:
-        return "np-status-yellow", "Regression"
-    return "np-status-red", f"Error ({return_code})"
-
-available_configs = set(discover_configs())
-
-# Build a working copy of categories filtered to available configs
-categories = []
-for cat in CATEGORIES:
-    filtered = [c for c in cat["configs"] if c in available_configs]
-    categories.append({"name": cat["name"], "configs": filtered})
+categories = filtered_categories(set(discover_configs()))
 
 # --- Session state ---
 if "mc_results" not in st.session_state:
@@ -66,7 +50,7 @@ with st.sidebar:
     selected_cat = next(c for c in categories if c["name"] == selected_cat_name)
 
     # Build metric reverse index for this category
-    metrics_index = get_metrics_for_configs(selected_cat["configs"])
+    metrics_index = get_metrics_for_configs(_all_configs_for_category(selected_cat))
     metric_names = sorted(metrics_index.keys())
 
     if not metric_names:
@@ -116,7 +100,7 @@ def _run_correlation(appearances, versions, lookback):
     for config_name in unique_configs:
         for version in versions:
             key = (config_name, version)
-            display = config_name.replace(".yaml", "")
+            display = display_name(config_name)
             pos = f"({completed + 1}/{total_runs})"
             overall.progress(completed / max(total_runs, 1), text=f"{pos} {display} v{version}")
 
@@ -162,9 +146,11 @@ def _run_correlation(appearances, versions, lookback):
                 }
             except Exception as e:
                 shutil.rmtree(temp_dir, ignore_errors=True)
+                _es = os.environ.get("ES_SERVER", "")
+                sanitized = str(e).replace(_es, "***") if _es else str(e)
                 results[key] = {
                     "return_code": -1,
-                    "full_output": str(e),
+                    "full_output": sanitized,
                     "n_metrics": 0,
                     "temp_dir": None,
                     "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -195,7 +181,7 @@ if selected_cell and selected_cell in st.session_state["mc_results"]:
         st.session_state["mc_selected_cell"] = None
         st.rerun()
 
-    display = config_name.replace(".yaml", "")
+    display = display_name(config_name)
     st.subheader(f"{display} — v{version}")
 
     result = st.session_state["mc_results"][selected_cell]
@@ -225,7 +211,7 @@ elif st.session_state["mc_results"]:
 
     # Data rows
     for config_name in unique_configs:
-        display = config_name.replace(".yaml", "")
+        display = display_name(config_name)
         tests_with_metric = [t for c, t in appearances if c == config_name]
 
         st.markdown('<div class="mc-row">', unsafe_allow_html=True)
@@ -245,12 +231,12 @@ elif st.session_state["mc_results"]:
 
             with row_cols[i + 1]:
                 rc = result["return_code"] if result else None
-                status_cls, status_text = _status_for_return_code(rc)
+                info = _status_info(rc)
+                status_cls, status_text = info["pill"], info["label"]
 
                 dur_text = ""
                 if result and result.get("duration"):
-                    mins, secs = divmod(int(result["duration"]), 60)
-                    dur_text = f"{mins}m {secs}s" if mins else f"{secs}s"
+                    dur_text = format_duration(result["duration"])
 
                 st.markdown(
                     f'<div class="mc-cell">'
