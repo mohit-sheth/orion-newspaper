@@ -4,10 +4,11 @@ IMAGE ?= quay.io/msheth/orion-newspaper
 TAG ?= latest
 
 run:
-	@if [ ! -d /tmp/orion ]; then \
-		echo "Cloning orion repo..."; \
-		git clone https://github.com/cloud-bulldozer/orion.git /tmp/orion; \
-	fi
+	# TODO: Switch back to cloud-bulldozer/orion once add-configs-med-large is merged
+	# Original: git clone https://github.com/cloud-bulldozer/orion.git /tmp/orion
+	@rm -rf /tmp/orion
+	@echo "Cloning orion repo..."
+	@git clone -b add-configs-med-large https://github.com/mohit-sheth/orion.git /tmp/orion
 	@echo "Starting locally..."
 	ORION_DIR=$$(pwd)/venv ORION_EXAMPLES_DIR=/tmp/orion/examples \
 		./venv/bin/streamlit run app.py --server.headless true --server.port 8501 --server.address 127.0.0.1

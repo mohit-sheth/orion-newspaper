@@ -1,6 +1,6 @@
 import pytest
-import orion_runner
 
+import orion_runner
 
 SIMPLE_YAML = """\
 tests:
@@ -20,6 +20,19 @@ tests:
     metrics:
       - name: throughput
       - name: disk_io
+"""
+
+AGG_YAML = """\
+tests:
+  - name: test-agg
+    metrics:
+      - name: podReadyLatency
+        metric_of_interest: P99
+      - name: ovnMem
+        metric_of_interest: value
+        agg:
+          value: mem
+          agg_type: avg
 """
 
 SAMPLE_CSV = """\

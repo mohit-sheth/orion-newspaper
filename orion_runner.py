@@ -4,9 +4,11 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -36,6 +38,7 @@ ALGORITHM_FLAGS: dict[str, str] = {
 
 # --- Config discovery ---
 
+
 @st.cache_data(ttl=300)
 def discover_configs() -> list[str]:
     pattern = os.path.join(ORION_EXAMPLES_DIR, "*.yaml")
@@ -43,7 +46,10 @@ def discover_configs() -> list[str]:
 
 
 def get_config_path(config_name: str) -> str:
-    return os.path.join(ORION_EXAMPLES_DIR, config_name)
+    resolved = os.path.realpath(os.path.join(ORION_EXAMPLES_DIR, config_name))
+    if not resolved.startswith(os.path.realpath(ORION_EXAMPLES_DIR)):
+        raise ValueError("Invalid config path")
+    return resolved
 
 
 def _load_config_yaml(config_name: str) -> "list[dict] | None":
@@ -75,17 +81,32 @@ def get_config_metadata(config_name: str) -> dict[str, Any]:
     }
 
 
+def _full_metric_name(metric: dict) -> str:
+    """Build the full metric name as orion outputs it.
+
+    Standard metrics: {name}_{metric_of_interest} (e.g., podReadyLatency_P99)
+    Aggregated metrics: {name}_{agg_type} (e.g., ovnMem-ovncontroller_avg)
+    """
+    name = metric.get("name", "unnamed")
+    agg = metric.get("agg")
+    if agg and "agg_type" in agg:
+        return f"{name}_{agg['agg_type']}"
+    moi = metric.get("metric_of_interest", "")
+    return f"{name}_{moi}" if moi else name
+
+
 @st.cache_data(ttl=300)
 def get_config_metrics(config_name: str) -> dict[str, list[str]]:
-    """Return {test_name: [metric_name, ...]} for a config."""
+    """Return {test_name: [metric_name, ...]} for a config.
+
+    Metric names include the metric_of_interest suffix (e.g., podReadyLatency_P99)
+    to match orion's JSON output column names.
+    """
     tests = _load_config_yaml(config_name)
     if tests is None:
         return {}
 
-    return {
-        t.get("name", "unnamed"): [m.get("name", "unnamed") for m in t.get("metrics", [])]
-        for t in tests
-    }
+    return {t.get("name", "unnamed"): [_full_metric_name(m) for m in t.get("metrics", [])] for t in tests}
 
 
 def get_metrics_for_configs(config_names: list[str]) -> dict[str, list[tuple[str, str]]]:
@@ -99,6 +120,7 @@ def get_metrics_for_configs(config_names: list[str]) -> dict[str, list[tuple[str
 
 
 # --- Command building ---
+
 
 def create_temp_dir() -> str:
     return tempfile.mkdtemp(prefix="orion_run_")
@@ -115,6 +137,9 @@ def build_command(params: dict[str, Any]) -> tuple[list[str], dict[str, str], st
 
     if params.get("lookback"):
         cmd.extend(["--lookback", params["lookback"]])
+
+    if params.get("since"):
+        cmd.extend(["--since", params["since"]])
 
     if params.get("node_count"):
         cmd.extend(["--node-count", "true"])
@@ -181,7 +206,9 @@ def humanize_command(cmd: list[str]) -> str:
             parts.append(arg)
     return " \\\n  ".join(parts)
 
+
 # --- Rate limiting ---
+
 
 def _acquire_run_lock() -> "int | None":
     try:
@@ -199,7 +226,9 @@ def _release_run_lock(fd: int) -> None:
     except OSError:
         pass
 
+
 # --- Subprocess execution ---
+
 
 def _parse_log_message(line: str) -> "tuple[str, str] | None":
     m = re.match(
@@ -283,7 +312,10 @@ def run_orion(
         progress_bar.progress(1.0, text="Complete")
         logger.info(
             "orion_run_end config=%s return_code=%d duration=%.1fs metrics=%d",
-            config_name, process.returncode, elapsed, metrics_collected,
+            config_name,
+            process.returncode,
+            elapsed,
+            metrics_collected,
         )
         return process.returncode, "".join(all_lines), log_messages
 
@@ -299,7 +331,9 @@ def run_orion(
     finally:
         _release_run_lock(lock_fd)
 
+
 # --- Output parsing ---
+
 
 def parse_csv_data(temp_dir: str) -> list[tuple[str, "pd.DataFrame"]]:
     csv_files = sorted(glob.glob(os.path.join(temp_dir, "data*.csv")))
@@ -365,17 +399,247 @@ def extract_regressions_json(temp_dir: str) -> list[dict[str, Any]]:
                         prev_ver = prev_entry.get("ocpVersion", prev_entry.get("build", ""))
                         prev_metric = prev_entry.get("metrics", {}).get(metric_name, {})
                         prev_value = prev_metric.get("value", "")
-                    regressions.append({
-                        "test_name": test_name,
-                        "metric": metric_name,
-                        "percentage_change": round(pct, 2),
-                        "prev_value": prev_value,
-                        "bad_value": bad_value,
-                        "prev_ver": str(prev_ver),
-                        "bad_ver": str(bad_ver),
-                    })
+                    regressions.append(
+                        {
+                            "test_name": test_name,
+                            "metric": metric_name,
+                            "percentage_change": round(pct, 2),
+                            "prev_value": prev_value,
+                            "bad_value": bad_value,
+                            "prev_ver": str(prev_ver),
+                            "bad_ver": str(bad_ver),
+                        }
+                    )
             prev_entry = entry
 
     # Sort by absolute percentage change descending (most severe first)
     regressions.sort(key=lambda r: abs(r["percentage_change"]), reverse=True)
     return regressions
+
+
+def extract_metrics_json(temp_dir: str) -> list[dict[str, Any]]:
+    """Parse saved JSON output files to extract per-run metric values.
+
+    Returns list of dicts with keys: uuid, timestamp, and one key per metric name.
+    Each dict represents one run/data point.
+    """
+    if not temp_dir:
+        return []
+
+    json_files = sorted(glob.glob(os.path.join(temp_dir, "output_*.json")))
+    runs: list[dict[str, Any]] = []
+
+    for json_file in json_files:
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+        except Exception:
+            logger.warning("Failed to parse JSON %s", json_file, exc_info=True)
+            continue
+
+        if not isinstance(data, list):
+            continue
+
+        for entry in data:
+            row: dict[str, Any] = {
+                "uuid": entry.get("uuid", ""),
+                "timestamp": entry.get("timestamp", ""),
+            }
+            for metric_name, metric_data in entry.get("metrics", {}).items():
+                if isinstance(metric_data, dict):
+                    row[metric_name] = metric_data.get("value")
+                else:
+                    row[metric_name] = metric_data
+            runs.append(row)
+
+    return runs
+
+
+# --- Shared execution helpers ---
+
+
+class NoOpTracker:
+    """No-op progress/status tracker for batch runs that manage their own progress."""
+
+    def progress(self, pct, text=""):
+        pass
+
+    def text(self, t):
+        pass
+
+
+def execute_config(
+    config_name,
+    version,
+    lookback,
+    since="",
+    algorithm="hunter-analyze",
+    benchmark_index="",
+    metadata_index="",
+    status_tracker=None,
+    progress_tracker=None,
+    metric_total=0,
+    prev_temp_dir=None,
+):
+    """Run orion for a single config and return a standardized result dict.
+
+    Defaults to hunter-analyze algorithm. Pass algorithm="filter" for faster runs
+    that skip changepoint detection (useful for trend data collection).
+
+    Handles temp dir lifecycle, command building, error handling with ES_SERVER scrubbing.
+    Callers can augment the returned dict with extra fields (e.g. regressions, n_runs).
+    """
+    if prev_temp_dir and os.path.exists(prev_temp_dir):
+        shutil.rmtree(prev_temp_dir, ignore_errors=True)
+
+    temp_dir = create_temp_dir()
+    params = {
+        "config_path": get_config_path(config_name),
+        "algorithm": algorithm,
+        "lookback": lookback,
+        "since": since,
+        "version": version,
+        "benchmark_index": benchmark_index or os.environ.get("es_benchmark_index", DEFAULT_BENCHMARK_INDEX),
+        "metadata_index": metadata_index or os.environ.get("es_metadata_index", DEFAULT_METADATA_INDEX),
+        "node_count": False,
+        "debug": False,
+        "sippy_pr_search": False,
+        "temp_dir": temp_dir,
+    }
+
+    cmd, env, cwd = build_command(params)
+    cmd_display = humanize_command(cmd)
+
+    _tracker = NoOpTracker()
+    if status_tracker is None:
+        status_tracker = _tracker
+    if progress_tracker is None:
+        progress_tracker = _tracker
+
+    try:
+        t0 = time.monotonic()
+        return_code, full_output, log_messages = run_orion(
+            cmd,
+            env,
+            cwd,
+            status_tracker,
+            progress_tracker,
+            metric_total,
+        )
+        elapsed = time.monotonic() - t0
+        n_metrics = sum(1 for _, msg in log_messages if "Collecting " in msg)
+
+        # Scrub ES_SERVER from subprocess output at capture point
+        _es = os.environ.get("ES_SERVER", "")
+        if _es and _es in full_output:
+            full_output = full_output.replace(_es, "***")
+
+        return {
+            "return_code": return_code,
+            "full_output": full_output,
+            "n_metrics": n_metrics,
+            "temp_dir": temp_dir,
+            "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "duration": elapsed,
+            "cmd_display": cmd_display,
+        }
+    except Exception as e:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        _es = os.environ.get("ES_SERVER", "")
+        sanitized = str(e).replace(_es, "***") if _es else str(e)
+        return {
+            "return_code": -1,
+            "full_output": sanitized,
+            "n_metrics": 0,
+            "temp_dir": None,
+            "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "duration": 0,
+            "cmd_display": "",
+        }
+
+
+# --- Trend analysis helpers ---
+
+
+def generate_date_windows(months_back: int = 6) -> list[tuple[str, str]]:
+    """Generate (since_date, lookback) pairs for monthly windows going back from today.
+
+    Returns list of tuples like [("2026-03-18", "30d"), ("2026-02-16", "30d"), ...].
+    Ordered from oldest to newest.
+    """
+    today = datetime.now()
+    windows = []
+    for i in range(months_back):
+        since = today - timedelta(days=30 * i)
+        windows.append((since.strftime("%Y-%m-%d"), "30d"))
+    windows.reverse()
+    return windows
+
+
+def aggregate_weekly_trends(
+    monthly_json_data: list[tuple[str, list[dict[str, Any]]]],
+    metrics: list[str],
+    agg_func: str = "median",
+) -> "pd.DataFrame":
+    """Aggregate monthly JSON data into weekly trend data points.
+
+    Args:
+        monthly_json_data: list of (since_date, extract_metrics_json result) pairs
+        metrics: metric column names to aggregate
+        agg_func: "median" or "mean"
+
+    Returns:
+        DataFrame with columns: week_start, n_runs, plus one column per metric.
+        Sorted by week_start ascending.
+    """
+    all_rows = []
+    for _since_date, runs in monthly_json_data:
+        all_rows.extend(runs)
+
+    if not all_rows:
+        return pd.DataFrame(columns=["week_start", "n_runs"] + metrics)
+
+    combined = pd.DataFrame(all_rows)
+    if "timestamp" not in combined.columns:
+        return pd.DataFrame(columns=["week_start", "n_runs"] + metrics)
+
+    # Handle both unix timestamps (int/float) and ISO strings
+    ts = combined["timestamp"]
+    if ts.dtype in ("int64", "float64"):
+        combined["timestamp"] = pd.to_datetime(ts, unit="s", errors="coerce")
+    else:
+        combined["timestamp"] = pd.to_datetime(ts, errors="coerce")
+    combined = combined.dropna(subset=["timestamp"])
+
+    if combined.empty:
+        return pd.DataFrame(columns=["week_start", "n_runs"] + metrics)
+
+    # Drop duplicate UUIDs (overlapping monthly windows may fetch same run)
+    if "uuid" in combined.columns:
+        combined = combined.drop_duplicates(subset=["uuid"])
+
+    # Group by ISO year-week
+    combined["_year"] = combined["timestamp"].dt.isocalendar().year
+    combined["_week"] = combined["timestamp"].dt.isocalendar().week
+    grouped = combined.groupby(["_year", "_week"])
+
+    rows = []
+    agg = "median" if agg_func == "median" else "mean"
+    for (year, week), group in grouped:
+        # Monday of that ISO week
+        week_start = datetime.strptime(f"{year}-W{week:02d}-1", "%G-W%V-%u")
+        row: dict[str, Any] = {
+            "_sort_key": week_start.strftime("%Y-%m-%d"),
+            "week_start": week_start.strftime("%b %d"),
+            "n_runs": len(group),
+        }
+        for m in metrics:
+            if m in group.columns:
+                row[m] = getattr(group[m], agg)()
+            else:
+                row[m] = None
+        rows.append(row)
+
+    result = pd.DataFrame(rows)
+    result = result.sort_values("_sort_key").reset_index(drop=True)
+    return result.drop(columns=["_sort_key"])

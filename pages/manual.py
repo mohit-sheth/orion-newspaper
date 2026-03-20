@@ -1,5 +1,4 @@
 import os
-import re
 import shutil
 import tempfile
 import time
@@ -10,13 +9,23 @@ import streamlit as st
 from streamlit_ace import st_ace
 
 from orion_runner import (
-    build_command, run_orion, create_temp_dir, humanize_command,
-    discover_configs, get_config_path, get_config_metadata,
+    build_command,
+    create_temp_dir,
+    discover_configs,
+    get_config_metadata,
+    get_config_path,
+    humanize_command,
+    run_orion,
 )
 from shared_rendering import (
-    render_css, render_header, render_es_status, render_results, render_lookback,
-    OCP_VERSIONS, OCP_VERSION_DEFAULT_INDEX,
-    DEFAULT_BENCHMARK_INDEX, DEFAULT_METADATA_INDEX,
+    INDEX_PRESETS,
+    OCP_VERSION_DEFAULT_INDEX,
+    OCP_VERSIONS,
+    render_css,
+    render_es_status,
+    render_header,
+    render_lookback,
+    render_results,
 )
 
 CUSTOM_CONFIG_LABEL = "Custom Config"
@@ -38,13 +47,19 @@ tests:
 """
 
 render_css()
-render_header()
+render_header("Manual Execute", "Run a single config with custom parameters")
 
 # --- Session state ---
 for key, default in [
-    ("running", False), ("full_output", ""), ("return_code", None),
-    ("temp_dir", None), ("cmd_display", ""), ("n_metrics", 0),
-    ("expand_all", True), ("run_duration", None), ("run_finished", None),
+    ("running", False),
+    ("full_output", ""),
+    ("return_code", None),
+    ("temp_dir", None),
+    ("cmd_display", ""),
+    ("n_metrics", 0),
+    ("expand_all", True),
+    ("run_duration", None),
+    ("run_finished", None),
     ("custom_config_path", None),
 ]:
     if key not in st.session_state:
@@ -91,15 +106,17 @@ with st.sidebar:
         st.error("ES_SERVER is not set. Execute is disabled.")
     col_exec, col_clear = st.columns([2, 1])
     with col_exec:
-        execute_clicked = st.button("Execute", type="primary", use_container_width=True,
-                                    disabled=st.session_state.running or not es_server)
+        execute_clicked = st.button(
+            "Execute", type="primary", use_container_width=True, disabled=st.session_state.running or not es_server
+        )
     with col_clear:
         clear_clicked = st.button("Clear", use_container_width=True)
 
     with st.expander("Advanced Options"):
         algorithm = st.selectbox("Algorithm", ["hunter-analyze", "anomaly-detection", "cmr", "filter"], index=0)
-        benchmark_index = st.text_input("Benchmark Index", value=os.environ.get("es_benchmark_index", DEFAULT_BENCHMARK_INDEX))
-        metadata_index = st.text_input("Metadata Index", value=os.environ.get("es_metadata_index", DEFAULT_METADATA_INDEX))
+        preset_names = list(INDEX_PRESETS.keys())
+        selected_preset = st.selectbox("ES Index Preset", preset_names, index=0, key="manual_index_preset")
+        benchmark_index, metadata_index = INDEX_PRESETS[selected_preset]
         uuid_input = st.text_input("Base UUID", value="")
         baseline_input = st.text_input("Baseline UUID(s)", value="")
         display_input = st.text_input("Display fields", value="buildUrl")
@@ -144,14 +161,6 @@ if execute_clicked:
         st.error("ES Server is required. Set the ES_SERVER env var.")
         st.stop()
 
-    _INDEX_RE = re.compile(r"^[a-zA-Z0-9_.*-]+$")
-    if benchmark_index and not _INDEX_RE.match(benchmark_index):
-        st.error("Invalid benchmark index pattern. Use only alphanumeric, `_`, `.`, `*`, `-`.")
-        st.stop()
-    if metadata_index and not _INDEX_RE.match(metadata_index):
-        st.error("Invalid metadata index pattern. Use only alphanumeric, `_`, `.`, `*`, `-`.")
-        st.stop()
-
     # Resolve config path
     if is_custom:
         custom_yaml = st.session_state.get("custom_yaml_content", "").strip()
@@ -181,11 +190,18 @@ if execute_clicked:
 
     params = {
         "config_path": config_path,
-        "algorithm": algorithm, "lookback": lookback, "node_count": node_count,
+        "algorithm": algorithm,
+        "lookback": lookback,
+        "node_count": node_count,
         "version": version,
-        "benchmark_index": benchmark_index, "metadata_index": metadata_index,
-        "uuid": uuid_input, "baseline": baseline_input,
-        "display": display_input, "debug": debug, "sippy_pr_search": sippy_pr_search, "temp_dir": temp_dir,
+        "benchmark_index": benchmark_index,
+        "metadata_index": metadata_index,
+        "uuid": uuid_input,
+        "baseline": baseline_input,
+        "display": display_input,
+        "debug": debug,
+        "sippy_pr_search": sippy_pr_search,
+        "temp_dir": temp_dir,
     }
 
     cmd, env, cwd = build_command(params)
@@ -222,12 +238,12 @@ elif not is_custom:
     n_configs = len(configs)
     st.markdown(
         '<div class="welcome-card">'
-        '<h2>Manual Execute</h2>'
+        "<h2>Manual Execute</h2>"
         f'<p><span class="accent">{n_configs}</span> configs available. '
         f'Pick one in the sidebar and hit <span class="accent">Execute</span>.</p>'
         '<hr class="divider">'
-        '<p>Orion queries Elasticsearch for historical runs, applies changepoint detection, '
-        'and surfaces regressions with interactive Plotly visualizations.</p>'
-        '</div>',
+        "<p>Orion queries Elasticsearch for historical runs, applies changepoint detection, "
+        "and surfaces regressions with interactive Plotly visualizations.</p>"
+        "</div>",
         unsafe_allow_html=True,
     )

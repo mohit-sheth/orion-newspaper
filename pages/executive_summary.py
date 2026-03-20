@@ -4,13 +4,17 @@ import streamlit as st
 
 from orion_runner import discover_configs
 from shared_rendering import (
-    render_css, render_header, render_regression_table,
-    filtered_categories, _all_configs_for_category, display_name,
+    _all_configs_for_category,
     _status_info,
+    display_name,
+    filtered_categories,
+    render_css,
+    render_header,
+    render_regression_table,
 )
 
 render_css()
-render_header()
+render_header("Executive Summary", "Aggregated regression view across all configs")
 
 categories = filtered_categories(set(discover_configs()))
 
@@ -19,10 +23,10 @@ np_results = st.session_state.get("np_results", {})
 if not np_results:
     st.markdown(
         '<div class="welcome-card">'
-        '<h2>Executive Summary</h2>'
+        "<h2>Executive Summary</h2>"
         '<p>No data yet. Run <span class="accent">Newspaper &rarr; Refresh Now</span> first, '
-        'then come back here for an aggregated view.</p>'
-        '</div>',
+        "then come back here for an aggregated view.</p>"
+        "</div>",
         unsafe_allow_html=True,
     )
     st.stop()
@@ -39,8 +43,6 @@ all_regressions = []
 for config_name, result in np_results.items():
     for reg in result.get("regressions", []):
         all_regressions.append({**reg, "config": display_name(config_name)})
-
-unique_regressed_metrics = set(r["metric"] for r in all_regressions)
 
 # --- Overall Health ---
 if regression_count == 0 and error_count == 0:
@@ -59,15 +61,14 @@ st.markdown(
 )
 
 reg_cls = " summary-card-alert" if regression_count > 0 else ""
+err_cls = " summary-card-alert" if error_count > 0 else ""
 st.markdown(
     f'<div class="summary-row">'
-    f'<div class="summary-card"><div class="num">{ok_count}/{total_configs}</div><div class="lbl">Configs Pass</div></div>'
-    f'<div class="summary-card{reg_cls}"><div class="num">{regression_count}</div><div class="lbl">Configs Regressed</div></div>'
-    f'<div class="summary-card"><div class="num">{len(all_regressions)}</div><div class="lbl">Total Regressions</div></div>'
-    f'<div class="summary-card"><div class="num">{len(unique_regressed_metrics)}</div><div class="lbl">Unique Metrics</div></div>'
-    f'<div class="summary-card"><div class="num">{nodata_count}</div><div class="lbl">No Data</div></div>'
-    f'<div class="summary-card"><div class="num">{error_count}</div><div class="lbl">Errors</div></div>'
-    f'</div>',
+    f'<div class="summary-card"><div class="num">{ok_count}/{total_configs}</div><div class="lbl">Pass</div></div>'
+    f'<div class="summary-card{reg_cls}">'
+    f'<div class="num">{regression_count}</div><div class="lbl">Regressions</div></div>'
+    f'<div class="summary-card{err_cls}"><div class="num">{error_count}</div><div class="lbl">Errors</div></div>'
+    f"</div>",
     unsafe_allow_html=True,
 )
 
@@ -82,7 +83,8 @@ if non_empty_cats:
             cat_ok = sum(1 for c in cat_cfgs if np_results.get(c, {}).get("return_code") == 0)
             cat_reg = sum(1 for c in cat_cfgs if np_results.get(c, {}).get("return_code") == 2)
             cat_nodata = sum(1 for c in cat_cfgs if np_results.get(c, {}).get("return_code") == 3)
-            cat_err = len(cat_cfgs) - cat_ok - cat_reg - cat_nodata
+            cat_run = sum(1 for c in cat_cfgs if c in np_results)
+            cat_err = cat_run - cat_ok - cat_reg - cat_nodata
             cat_total = len(cat_cfgs)
 
             cat_rc = -1 if cat_err > 0 else (2 if cat_reg > 0 else 0)
@@ -92,10 +94,10 @@ if non_empty_cats:
                 f'<div class="mc-cell" style="padding: 1rem;">'
                 f'<div class="mc-config-name">{_esc(cat["name"])}</div>'
                 f'<div class="np-status {cat_info["pill"]}" style="margin-top: 0.5rem;">'
-                f'{cat_ok}/{cat_total} Pass</div>'
+                f"{cat_ok}/{cat_total} Pass</div>"
                 f'<div class="mc-test-name" style="margin-top: 0.4rem;">'
-                f'{cat_reg} regression(s), {cat_err} error(s)</div>'
-                f'</div>',
+                f"{cat_reg} regression(s), {cat_err} error(s)</div>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
 

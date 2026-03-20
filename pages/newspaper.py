@@ -1,5 +1,4 @@
 import os
-import shutil
 import time
 from datetime import datetime
 from html import escape as _esc
@@ -8,20 +7,31 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from orion_runner import (
-    build_command, run_orion, create_temp_dir, humanize_command,
-    discover_configs, get_config_path, get_config_metadata,
-    extract_regressions_json, parse_csv_data,
+    discover_configs,
+    execute_config,
+    extract_regressions_json,
+    get_config_metadata,
+    parse_csv_data,
 )
 from shared_rendering import (
-    render_css, render_header, render_es_status, render_results, render_lookback,
-    _status_info, filtered_categories, _all_configs_for_category,
-    display_name, format_duration,
-    OCP_VERSIONS, OCP_VERSION_DEFAULT_INDEX,
-    DEFAULT_BENCHMARK_INDEX, DEFAULT_METADATA_INDEX,
+    OCP_VERSION_DEFAULT_INDEX,
+    OCP_VERSIONS,
+    _all_configs_for_category,
+    _status_info,
+    display_name,
+    filtered_categories,
+    format_duration,
+    render_css,
+    render_es_status,
+    render_header,
+    render_index_selector,
+    render_loading_subtitle,
+    render_lookback,
+    render_results,
 )
 
 render_css()
-render_header()
+render_header("Newspaper", "Auto-refresh grid of all monitored configs with regression detection")
 
 categories = filtered_categories(set(discover_configs()))
 
@@ -50,6 +60,7 @@ with st.sidebar:
 
     version = st.selectbox("OCP Version", OCP_VERSIONS, index=OCP_VERSION_DEFAULT_INDEX, key="np_version")
     lookback = render_lookback(default_index=0, key_prefix="np")
+    benchmark_index, metadata_index = render_index_selector("np")
 
     render_es_status()
 
@@ -57,8 +68,12 @@ with st.sidebar:
     es_server = os.environ.get("ES_SERVER", "")
     if not es_server:
         st.error("ES_SERVER is not set. Refresh is disabled.")
-    refresh_clicked = st.button("Refresh Now", type="primary", use_container_width=True,
-                                disabled=st.session_state["np_is_running"] or not es_server)
+    refresh_clicked = st.button(
+        "Refresh Now",
+        type="primary",
+        use_container_width=True,
+        disabled=st.session_state["np_is_running"] or not es_server,
+    )
 
     last_poll = st.session_state["np_last_poll_time"]
     if last_poll > 0:
@@ -66,7 +81,7 @@ with st.sidebar:
 
 
 # --- Run all monitored configs ---
-def _run_all(monitored_configs, version, lookback):
+def _run_all(monitored_configs, version, lookback, benchmark_index, metadata_index):
     if not os.environ.get("ES_SERVER"):
         st.error("ES_SERVER env var not set")
         return
@@ -82,23 +97,30 @@ def _run_all(monitored_configs, version, lookback):
         config_metric_counts[cfg] = meta["metric_count"]
         total_metrics += meta["metric_count"]
 
-    overall = st.progress(0, text="Starting refresh...")
+    loading_placeholder = st.empty()
+    with loading_placeholder.container():
+        overall = st.progress(0, text="Starting refresh...")
+        render_loading_subtitle(len(monitored_configs), total_metrics)
     metrics_done = 0
 
     class _ProgressTracker:
         """Updates the single overall bar with config + metric name."""
+
         def __init__(self, bar, display, position, total_m, done):
             self._bar = bar
             self._display = display
             self._pos = position
             self._total = total_m
             self._done = done
+
         def progress(self, pct, text=""):
             if "Collecting " in text:
                 self._update(text.split("Collecting ")[-1].split(" (")[0])
+
         def text(self, t):
             if "Collecting " in t:
                 self._update(t.replace("Collecting ", "").rstrip("..."))
+
         def _update(self, metric):
             self._done += 1
             pct_overall = min(self._done / max(self._total, 1), 0.99)
@@ -106,73 +128,36 @@ def _run_all(monitored_configs, version, lookback):
 
     for i, config_name in enumerate(monitored_configs):
         display = display_name(config_name)
-        pos = f"({i+1}/{len(monitored_configs)})"
-        overall.progress(metrics_done / max(total_metrics, 1),
-                         text=f"{pos} {display}")
+        pos = f"({i + 1}/{len(monitored_configs)})"
+        overall.progress(metrics_done / max(total_metrics, 1), text=f"{pos} {display}")
 
-        # Clean up previous temp dir for this config
-        prev = results.get(config_name, {})
-        prev_dir = prev.get("temp_dir")
-        if prev_dir and os.path.exists(prev_dir):
-            shutil.rmtree(prev_dir, ignore_errors=True)
-
-        temp_dir = create_temp_dir()
-        params = {
-            "config_path": get_config_path(config_name),
-            "algorithm": "hunter-analyze",
-            "lookback": lookback,
-            "version": version,
-            "benchmark_index": os.environ.get("es_benchmark_index", DEFAULT_BENCHMARK_INDEX),
-            "metadata_index": os.environ.get("es_metadata_index", DEFAULT_METADATA_INDEX),
-            "node_count": False,
-            "debug": False,
-            "sippy_pr_search": False,
-            "temp_dir": temp_dir,
-        }
-
-        cmd, env, cwd = build_command(params)
-        cmd_display = humanize_command(cmd)
+        prev_dir = results.get(config_name, {}).get("temp_dir")
         tracker = _ProgressTracker(overall, display, pos, total_metrics, metrics_done)
+        result = execute_config(
+            config_name,
+            version,
+            lookback,
+            benchmark_index=benchmark_index,
+            metadata_index=metadata_index,
+            status_tracker=tracker,
+            progress_tracker=tracker,
+            prev_temp_dir=prev_dir,
+        )
 
-        try:
-            t0 = time.monotonic()
-            return_code, full_output, log_messages = run_orion(cmd, env, cwd, tracker, tracker, 0)
-            elapsed = time.monotonic() - t0
-            n_metrics = sum(1 for _, msg in log_messages if "Collecting " in msg)
-
-            regressions = extract_regressions_json(temp_dir) if return_code == 2 else []
-            csv_results = parse_csv_data(temp_dir)
-            n_runs = sum(len(df) for _, df in csv_results)
-            results[config_name] = {
-                "return_code": return_code,
-                "full_output": full_output,
-                "n_metrics": config_metric_counts.get(config_name, n_metrics),
-                "n_runs": n_runs,
-                "temp_dir": temp_dir,
-                "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "duration": elapsed,
-                "cmd_display": cmd_display,
-                "regressions": regressions,
-            }
-        except Exception as e:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            _es = os.environ.get("ES_SERVER", "")
-            sanitized = str(e).replace(_es, "***") if _es else str(e)
-            results[config_name] = {
-                "return_code": -1,
-                "full_output": sanitized,
-                "n_metrics": 0,
-                "n_runs": 0,
-                "temp_dir": None,
-                "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "duration": 0,
-                "cmd_display": "",
-                "regressions": [],
-            }
+        # Augment with newspaper-specific fields
+        if result["return_code"] == 2:
+            result["regressions"] = extract_regressions_json(result["temp_dir"])
+        else:
+            result["regressions"] = []
+        csv_data = parse_csv_data(result["temp_dir"]) if result["temp_dir"] else []
+        result["n_runs"] = sum(len(df) for _, df in csv_data)
+        result["n_metrics"] = config_metric_counts.get(config_name, result["n_metrics"])
+        results[config_name] = result
 
         metrics_done += config_metric_counts.get(config_name, 0)
 
     overall.progress(1.0, text="Refresh complete")
+    loading_placeholder.empty()
     st.session_state["np_last_poll_time"] = time.time()
     st.session_state["np_is_running"] = False
 
@@ -186,7 +171,7 @@ if st.session_state["np_last_poll_time"] > 0 and all_monitored:
         auto_trigger = True
 
 if (refresh_clicked or auto_trigger) and all_monitored and not st.session_state["np_is_running"]:
-    _run_all(all_monitored, version, lookback)
+    _run_all(all_monitored, version, lookback, benchmark_index, metadata_index)
     st.rerun()
 
 
@@ -229,7 +214,7 @@ def _render_card(config_name, result, key_suffix="", strip_prefix=""):
                 f'<div class="np-card-reg-item">'
                 f'<span class="metric-name">{_esc(reg.get("metric", ""))}</span>'
                 f'<span style="color: {pct_color};">{_esc(pct_str)}</span>'
-                f'</div>'
+                f"</div>"
             )
 
     # For regression cards, the status badge itself is the dropdown trigger
@@ -237,23 +222,20 @@ def _render_card(config_name, result, key_suffix="", strip_prefix=""):
         status_html = (
             f'<details class="np-card-regressions">'
             f'<summary class="np-status {status_cls}" style="cursor:pointer;">{_esc(status_text)}</summary>'
-            f'{items}'
-            f'</details>'
+            f"{items}"
+            f"</details>"
         )
     else:
         status_html = f'<div class="np-status {status_cls}">{_esc(status_text)}</div>'
 
     st.markdown(
-        f'<div class="np-card {card_cls}">'
-        f'<div class="np-card-name">{_esc(dn)}</div>'
-        f'{status_html}'
-        f'{summary}'
-        f'</div>',
+        f'<div class="np-card {card_cls}"><div class="np-card-name">{_esc(dn)}</div>{status_html}{summary}</div>',
         unsafe_allow_html=True,
     )
 
-    if st.button("Details", key=f"np_detail_{key_suffix}_{config_name}", use_container_width=True,
-                 disabled=result is None):
+    if st.button(
+        "Details", key=f"np_detail_{key_suffix}_{config_name}", use_container_width=True, disabled=result is None
+    ):
         st.session_state["np_selected_config"] = config_name
         st.rerun()
 
@@ -264,7 +246,7 @@ if selected and selected in st.session_state["np_results"]:
     cat_name = _find_category(selected)
     breadcrumb = f"{cat_name} / " if cat_name else ""
 
-    if st.button(f"← Back to grid"):
+    if st.button("← Back to grid"):
         st.session_state["np_selected_config"] = None
         st.rerun()
 
@@ -292,28 +274,25 @@ else:
             cat_configs = _all_configs_for_category(cat)
             if not cat_configs:
                 continue
-            config_badges = "".join(
-                f'<span class="badge">{_esc(display_name(c))}</span>'
-                for c in cat_configs
-            )
+            config_badges = "".join(f'<span class="badge">{_esc(display_name(c))}</span>' for c in cat_configs)
             cat_sections += (
                 f'<div style="margin-bottom: 0.6rem;">'
                 f'<span class="accent" style="font-size: 0.85rem;">{_esc(cat["name"])}</span>'
                 f'<div style="margin-top: 0.3rem;">{config_badges}</div>'
-                f'</div>'
+                f"</div>"
             )
         non_empty = sum(1 for c in categories if _all_configs_for_category(c))
         st.markdown(
             '<div class="welcome-card">'
-            '<h2>Newspaper</h2>'
+            "<h2>Newspaper</h2>"
             f'<p>Monitoring <span class="accent">{len(all_monitored)}</span> configs across '
-            f'{non_empty} categories.</p>'
+            f"{non_empty} categories.</p>"
             '<hr class="divider">'
-            f'{cat_sections}'
+            f"{cat_sections}"
             '<hr class="divider">'
             '<p>Click <span class="accent">Refresh Now</span> to run all configs. '
-            'After the first run, auto-refresh kicks in every 2 hours.</p>'
-            '</div>',
+            "After the first run, auto-refresh kicks in every 2 hours.</p>"
+            "</div>",
             unsafe_allow_html=True,
         )
     else:
@@ -331,16 +310,23 @@ else:
                         if not sub["configs"]:
                             continue
                         prefix = sub.get("prefix", "")
-                        with st.expander(f":orange[{sub['name']}]", expanded=True):
+                        has_issues = any(results.get(cfg, {}).get("return_code") in (2, -1) for cfg in sub["configs"])
+                        with st.expander(f":orange[{sub['name']}]", expanded=has_issues):
                             for row_start in range(0, len(sub["configs"]), cols_per_row):
-                                row_configs = sub["configs"][row_start:row_start + cols_per_row]
+                                row_configs = sub["configs"][row_start : row_start + cols_per_row]
                                 cols = st.columns(cols_per_row)
                                 for col, cfg in zip(cols, row_configs):
                                     with col:
-                                        _render_card(cfg, results.get(cfg), key_suffix=f"{cat['name']}_{sub['name']}", strip_prefix=prefix)
+                                        key = f"{cat['name']}_{sub['name']}"
+                                        _render_card(
+                                            cfg,
+                                            results.get(cfg),
+                                            key_suffix=key,
+                                            strip_prefix=prefix,
+                                        )
                 else:
                     for row_start in range(0, len(cat["configs"]), cols_per_row):
-                        row_configs = cat["configs"][row_start:row_start + cols_per_row]
+                        row_configs = cat["configs"][row_start : row_start + cols_per_row]
                         cols = st.columns(cols_per_row)
                         for col, cfg in zip(cols, row_configs):
                             with col:

@@ -2,13 +2,11 @@ import os
 
 import streamlit as st
 
-from orion_runner import ORION_DIR, ORION_BIN, ORION_EXAMPLES_DIR, discover_configs
-from shared_rendering import render_css, render_header, is_container, OCP_VERSIONS
+from orion_runner import ORION_BIN, ORION_DIR, ORION_EXAMPLES_DIR, discover_configs
+from shared_rendering import OCP_VERSIONS, is_container, render_css, render_header
 
 render_css()
-render_header()
-
-st.subheader("About")
+render_header("About", "Environment info and repo links")
 
 # --- Mode ---
 _mode = "Container" if is_container() else "Local-Dev"

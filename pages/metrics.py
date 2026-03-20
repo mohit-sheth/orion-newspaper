@@ -1,33 +1,32 @@
 import os
-import shutil
-import time
-from datetime import datetime
 from html import escape as _esc
 
 import streamlit as st
 
 from orion_runner import (
-    build_command, run_orion, create_temp_dir, humanize_command,
-    discover_configs, get_config_path, get_metrics_for_configs,
+    discover_configs,
+    execute_config,
+    get_metrics_for_configs,
 )
 from shared_rendering import (
-    render_css, render_header, render_es_status, render_results, render_lookback,
-    _status_info, filtered_categories, _all_configs_for_category,
-    display_name, format_duration,
-    OCP_VERSIONS, OCP_VERSION_DEFAULT_INDEX,
-    DEFAULT_BENCHMARK_INDEX, DEFAULT_METADATA_INDEX,
+    OCP_VERSION_DEFAULT_INDEX,
+    OCP_VERSIONS,
+    _all_configs_for_category,
+    _status_info,
+    display_name,
+    filtered_categories,
+    format_duration,
+    render_css,
+    render_es_status,
+    render_header,
+    render_index_selector,
+    render_loading_subtitle,
+    render_lookback,
+    render_results,
 )
 
 render_css()
-render_header()
-
-
-class _NoOpTracker:
-    """No-op progress tracker for batch runs that use their own overall progress bar."""
-    def progress(self, pct, text=""):
-        pass
-    def text(self, t):
-        pass
+render_header("Metric Correlation", "Check if a metric regresses consistently across configs and versions")
 
 categories = filtered_categories(set(discover_configs()))
 
@@ -71,6 +70,7 @@ with st.sidebar:
         key="mc_versions",
     )
     lookback = render_lookback(default_index=0, key_prefix="mc")
+    benchmark_index, metadata_index = render_index_selector("mc")
 
     render_es_status()
 
@@ -79,13 +79,15 @@ with st.sidebar:
     if not es_server:
         st.error("ES_SERVER is not set. Analyze is disabled.")
     analyze_clicked = st.button(
-        "Analyze", type="primary", use_container_width=True,
+        "Analyze",
+        type="primary",
+        use_container_width=True,
         disabled=st.session_state["mc_is_running"] or not es_server or not versions,
     )
 
 
 # --- Run logic ---
-def _run_correlation(appearances, versions, lookback):
+def _run_correlation(appearances, versions, lookback, benchmark_index, metadata_index):
     """Run orion for each (config, version) pair that contains the selected metric."""
     st.session_state["mc_is_running"] = True
     results = st.session_state["mc_results"]
@@ -94,7 +96,10 @@ def _run_correlation(appearances, versions, lookback):
     unique_configs = list(dict.fromkeys(cfg for cfg, _ in appearances))
     total_runs = len(unique_configs) * len(versions)
 
-    overall = st.progress(0, text="Starting analysis...")
+    loading_placeholder = st.empty()
+    with loading_placeholder.container():
+        overall = st.progress(0, text="Starting analysis...")
+        render_loading_subtitle(len(unique_configs), total_runs, item_label="runs")
     completed = 0
 
     for config_name in unique_configs:
@@ -104,63 +109,19 @@ def _run_correlation(appearances, versions, lookback):
             pos = f"({completed + 1}/{total_runs})"
             overall.progress(completed / max(total_runs, 1), text=f"{pos} {display} v{version}")
 
-            # Clean up previous temp dir for this key
-            prev = results.get(key, {})
-            prev_dir = prev.get("temp_dir")
-            if prev_dir and os.path.exists(prev_dir):
-                shutil.rmtree(prev_dir, ignore_errors=True)
-
-            temp_dir = create_temp_dir()
-            params = {
-                "config_path": get_config_path(config_name),
-                "algorithm": "hunter-analyze",
-                "lookback": lookback,
-                "version": version,
-                "benchmark_index": os.environ.get("es_benchmark_index", DEFAULT_BENCHMARK_INDEX),
-                "metadata_index": os.environ.get("es_metadata_index", DEFAULT_METADATA_INDEX),
-                "node_count": False,
-                "debug": False,
-                "sippy_pr_search": False,
-                "temp_dir": temp_dir,
-            }
-
-            cmd, env, cwd = build_command(params)
-            cmd_display = humanize_command(cmd)
-
-            tracker = _NoOpTracker()
-
-            try:
-                t0 = time.monotonic()
-                return_code, full_output, log_messages = run_orion(cmd, env, cwd, tracker, tracker, 0)
-                elapsed = time.monotonic() - t0
-                n_metrics = sum(1 for _, msg in log_messages if "Collecting " in msg)
-
-                results[key] = {
-                    "return_code": return_code,
-                    "full_output": full_output,
-                    "n_metrics": n_metrics,
-                    "temp_dir": temp_dir,
-                    "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "duration": elapsed,
-                    "cmd_display": cmd_display,
-                }
-            except Exception as e:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                _es = os.environ.get("ES_SERVER", "")
-                sanitized = str(e).replace(_es, "***") if _es else str(e)
-                results[key] = {
-                    "return_code": -1,
-                    "full_output": sanitized,
-                    "n_metrics": 0,
-                    "temp_dir": None,
-                    "last_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "duration": 0,
-                    "cmd_display": "",
-                }
-
+            prev_dir = results.get(key, {}).get("temp_dir")
+            results[key] = execute_config(
+                config_name,
+                version,
+                lookback,
+                benchmark_index=benchmark_index,
+                metadata_index=metadata_index,
+                prev_temp_dir=prev_dir,
+            )
             completed += 1
 
     overall.progress(1.0, text="Analysis complete")
+    loading_placeholder.empty()
     st.session_state["mc_is_running"] = False
 
 
@@ -168,7 +129,7 @@ def _run_correlation(appearances, versions, lookback):
 if analyze_clicked and appearances and versions:
     st.session_state["mc_results"] = {}
     st.session_state["mc_selected_cell"] = None
-    _run_correlation(appearances, versions, lookback)
+    _run_correlation(appearances, versions, lookback, benchmark_index, metadata_index)
     st.rerun()
 
 
@@ -204,7 +165,7 @@ elif st.session_state["mc_results"]:
     # Header row
     header_cols = st.columns([2] + [1] * len(versions))
     with header_cols[0]:
-        st.markdown(f'<div class="mc-header">Config</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mc-header">Config</div>', unsafe_allow_html=True)
     for i, ver in enumerate(versions):
         with header_cols[i + 1]:
             st.markdown(f'<div class="mc-header">v{_esc(ver)}</div>', unsafe_allow_html=True)
@@ -221,7 +182,7 @@ elif st.session_state["mc_results"]:
                 f'<div class="mc-cell">'
                 f'<div class="mc-config-name">{_esc(display)}</div>'
                 f'<div class="mc-test-name">{_esc(", ".join(tests_with_metric))}</div>'
-                f'</div>',
+                f"</div>",
                 unsafe_allow_html=True,
             )
 
@@ -242,27 +203,28 @@ elif st.session_state["mc_results"]:
                     f'<div class="mc-cell">'
                     f'<div class="np-status {status_cls}">{_esc(status_text)}</div>'
                     f'<div class="mc-test-name" style="margin-top:0.3rem">{_esc(dur_text)}</div>'
-                    f'</div>',
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
                 if result is not None:
                     if st.button("Details", key=f"mc_detail_{config_name}_{ver}", use_container_width=True):
                         st.session_state["mc_selected_cell"] = key
                         st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # --- Summary ---
     st.divider()
     total_cells = len(unique_configs) * len(versions)
     regression_count = sum(
-        1 for cfg in unique_configs for ver in versions
-        if results.get((cfg, ver), {}).get("return_code") == 2
+        1 for cfg in unique_configs for ver in versions if results.get((cfg, ver), {}).get("return_code") == 2
     )
     ok_count = sum(
-        1 for cfg in unique_configs for ver in versions
-        if results.get((cfg, ver), {}).get("return_code") == 0
+        1 for cfg in unique_configs for ver in versions if results.get((cfg, ver), {}).get("return_code") == 0
     )
-    error_count = total_cells - regression_count - ok_count
+    nodata_count = sum(
+        1 for cfg in unique_configs for ver in versions if results.get((cfg, ver), {}).get("return_code") == 3
+    )
+    error_count = total_cells - regression_count - ok_count - nodata_count
 
     if regression_count > total_cells / 2:
         confidence_cls = "mc-confidence-high"
@@ -278,11 +240,11 @@ elif st.session_state["mc_results"]:
         f'<div class="mc-summary">'
         f'<div class="mc-confidence {confidence_cls}">{confidence_text} confidence</div>'
         f'<div style="color:#b0b0c0; font-size:0.85rem;">'
-        f'{regression_count} regression(s), {ok_count} OK, {error_count} error(s) '
-        f'across {len(unique_configs)} config(s) and {len(versions)} version(s) '
-        f'for metric <code>{_esc(selected_metric)}</code>'
-        f'</div>'
-        f'</div>',
+        f"{regression_count} regression(s), {ok_count} OK, {error_count} error(s) "
+        f"across {len(unique_configs)} config(s) and {len(versions)} version(s) "
+        f"for metric <code>{_esc(selected_metric)}</code>"
+        f"</div>"
+        f"</div>",
         unsafe_allow_html=True,
     )
 
@@ -290,12 +252,12 @@ elif st.session_state["mc_results"]:
 else:
     st.markdown(
         '<div class="welcome-card">'
-        '<h2>Metric Correlation</h2>'
+        "<h2>Metric Correlation</h2>"
         '<p>Select a <span class="accent">metric</span> to check if it regresses consistently '
-        'across multiple configs and versions.</p>'
+        "across multiple configs and versions.</p>"
         '<hr class="divider">'
-        '<p>Consistent regressions across configs increase confidence that a real issue exists. '
-        'If only one config shows a regression, it may be noise.</p>'
-        '</div>',
+        "<p>Consistent regressions across configs increase confidence that a real issue exists. "
+        "If only one config shows a regression, it may be noise.</p>"
+        "</div>",
         unsafe_allow_html=True,
     )

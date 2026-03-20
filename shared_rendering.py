@@ -4,7 +4,7 @@ from html import escape as _esc
 import streamlit as st
 import streamlit.components.v1 as components
 
-from orion_runner import parse_csv_data, find_viz_html, extract_regressions_json, DEFAULT_BENCHMARK_INDEX, DEFAULT_METADATA_INDEX
+from orion_runner import extract_regressions_json, find_viz_html, parse_csv_data
 
 APP_CSS = """
 <style>
@@ -14,7 +14,37 @@ APP_CSS = """
 div, button, input, select, textarea, .stSelectbox, .stTextInput, .stButton {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
-code, pre, .stCode, .stCodeBlock { font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', 'Consolas', monospace; }
+code, pre, .stCode, .stCodeBlock {
+    font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+}
+
+/* Sidebar sizing */
+section[data-testid="stSidebar"] {
+    font-size: 1.5rem !important;
+    min-width: 420px !important;
+    width: 420px !important;
+}
+section[data-testid="stSidebar"] h2 {
+    font-size: 2.1rem !important;
+    font-weight: 700 !important;
+}
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span {
+    font-size: 1.4rem !important;
+}
+section[data-testid="stSidebar"] div[data-baseweb="select"] {
+    font-size: 1.1rem !important;
+}
+section[data-testid="stSidebar"] input {
+    font-size: 1.1rem !important;
+}
+section[data-testid="stSidebar"] button {
+    font-size: 1.5rem !important;
+}
+section[data-testid="stSidebar"] small {
+    font-size: 1.1rem !important;
+}
 
 /* Use full width of main area */
 .stMainBlockContainer { max-width: 100%; padding-left: 2rem; padding-right: 2rem; }
@@ -23,7 +53,7 @@ section[data-testid="stSidebar"] { background-color: #141420; border-right: 1px 
 section[data-testid="stSidebar"] .stSelectbox label,
 section[data-testid="stSidebar"] .stTextInput label,
 section[data-testid="stSidebar"] .stCheckbox label {
-    color: #b0b0c0; font-weight: 500; font-size: 0.85rem; letter-spacing: 0.01em;
+    color: #b0b0c0; font-weight: 500; letter-spacing: 0.01em;
 }
 
 /* Modern dropdowns */
@@ -58,23 +88,23 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 }
 
 .newspaper-header {
-    padding: 1.2rem 0 0.8rem 0;
+    padding: 0.8rem 0 0.6rem 0;
     border-bottom: 1px solid #2a2a3a;
-    margin-bottom: 1.8rem;
+    margin-bottom: 1.2rem;
 }
 .newspaper-header h1 {
     color: #f0f0f5;
-    font-size: 1.6rem;
-    font-weight: 700;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 1.5rem;
+    font-weight: 800;
     margin: 0;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
 }
 .newspaper-header p {
-    color: #6c6c80;
-    font-size: 0.85rem;
+    color: #8080a0;
+    font-size: 1.1rem;
     font-weight: 400;
     margin: 0.3rem 0 0 0;
-    letter-spacing: 0.01em;
 }
 
 .status-badge {
@@ -210,7 +240,7 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.78rem;
+    font-size: 1rem;
     color: #6c6c80;
     margin-top: 0.3rem;
 }
@@ -309,6 +339,28 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
     white-space: nowrap;
 }
 
+/* Loading subtitle */
+.np-loading-subtitle {
+    color: #6c6c80;
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-top: -0.5rem;
+    letter-spacing: 0.01em;
+}
+
+/* Progress bar */
+.stProgress div[role="progressbar"],
+.stProgress div[data-testid="stProgressBar"] > div {
+    height: 16px !important;
+    border-radius: 8px !important;
+}
+.stProgress p {
+    color: #f0f0f5 !important;
+    font-size: 1.3rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em !important;
+}
+
 /* Metric correlation matrix */
 .mc-row {
     padding-bottom: 0.8rem;
@@ -364,12 +416,47 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 .mc-confidence-high { color: #f87171; }
 .mc-confidence-medium { color: #fbbf24; }
 .mc-confidence-low { color: #4ade80; }
+
+/* Trend charts */
+.trend-card {
+    background: #13131d;
+    border: 1px solid #2a2a3a;
+    border-left: 3px solid #6c6c80;
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+    margin-bottom: 1rem;
+}
+.trend-card-up { border-left-color: #f87171; background: #1a1318; }
+.trend-card-down { border-left-color: #4ade80; background: #131a18; }
+.trend-card-neutral { border-left-color: #6c6c80; }
+.trend-chart-label {
+    color: #e0e0ed;
+    font-size: 0.95rem;
+    font-weight: 600;
+    display: inline;
+}
+.trend-pct {
+    font-size: 0.85rem;
+    margin-left: 0.8rem;
+    font-weight: 600;
+}
+.trend-meta {
+    color: #6c6c80;
+    font-size: 0.75rem;
+    margin-top: 0.2rem;
+}
 </style>
 """
 
 OCP_VERSIONS = ["4.18", "4.19", "4.20", "4.21", "4.22", "4.23", "5.0"]
 OCP_VERSION_DEFAULT_INDEX = 4
 LOOKBACK_OPTIONS = ["7d", "15d", "30d", "60d", "Custom"]
+TREND_TIMERANGES = ["3 months", "6 months", "12 months"]
+
+INDEX_PRESETS = {
+    "Default": ("ripsaw-kube-burner-*", "perf_scale_ci*"),
+    "OSPST": ("ospst-ripsaw-kube-burner-*", "ospst-perf-scale-ci-*"),
+}
 
 CATEGORIES = [
     {
@@ -390,7 +477,9 @@ CATEGORIES = [
                 "prefix": "small-scale-",
                 "configs": [
                     "small-scale-cluster-density.yaml",
+                    "small-scale-node-density.yaml",
                     "small-scale-node-density-cni.yaml",
+                    "small-scale-udn-l2.yaml",
                     "small-scale-udn-l3.yaml",
                 ],
             },
@@ -398,6 +487,9 @@ CATEGORIES = [
                 "name": "120 nodes (med scale)",
                 "prefix": "med-scale-",
                 "configs": [
+                    "med-scale-cluster-density.yaml",
+                    "med-scale-node-density.yaml",
+                    "med-scale-node-density-cni.yaml",
                     "med-scale-udn-l2.yaml",
                 ],
             },
@@ -405,6 +497,9 @@ CATEGORIES = [
                 "name": "252 nodes (large scale)",
                 "prefix": "large-scale-",
                 "configs": [
+                    "large-scale-cluster-density.yaml",
+                    "large-scale-node-density.yaml",
+                    "large-scale-node-density-cni.yaml",
                     "large-scale-udn-l2.yaml",
                 ],
             },
@@ -449,7 +544,7 @@ def display_name(config_name: str, strip_prefix: str = "") -> str:
     """Strip .yaml extension and optional prefix for display."""
     name = config_name.replace(".yaml", "")
     if strip_prefix and name.startswith(strip_prefix):
-        name = name[len(strip_prefix):]
+        name = name[len(strip_prefix) :]
     return name
 
 
@@ -465,10 +560,30 @@ def is_container() -> bool:
 
 
 STATUS_MAP = {
-    None: {"pill": "np-status-gray", "badge": "status-error", "card": "np-card-pending", "label": "Pending"},
-    0:    {"pill": "np-status-green", "badge": "status-success", "card": "np-card-pass", "label": "Pass"},
-    2:    {"pill": "np-status-yellow", "badge": "status-regression", "card": "np-card-regression", "label": "Regression"},
-    3:    {"pill": "np-status-blue", "badge": "status-nodata", "card": "np-card-nodata", "label": "No Data"},
+    None: {
+        "pill": "np-status-gray",
+        "badge": "status-error",
+        "card": "np-card-pending",
+        "label": "Pending",
+    },
+    0: {
+        "pill": "np-status-green",
+        "badge": "status-success",
+        "card": "np-card-pass",
+        "label": "Pass",
+    },
+    2: {
+        "pill": "np-status-yellow",
+        "badge": "status-regression",
+        "card": "np-card-regression",
+        "label": "Regression",
+    },
+    3: {
+        "pill": "np-status-blue",
+        "badge": "status-nodata",
+        "card": "np-card-nodata",
+        "label": "No Data",
+    },
 }
 _ERROR_STATUS = {"pill": "np-status-red", "badge": "status-error", "card": "np-card-error"}
 
@@ -492,7 +607,7 @@ def render_regression_table(regressions, show_config=False):
     """Render regressions as an aligned table. Set show_config=True for executive summary."""
     if not regressions:
         return
-    config_th = '<th>Config</th>' if show_config else ''
+    config_th = "<th>Config</th>" if show_config else ""
     rows = ""
     for reg in regressions:
         pct = reg.get("percentage_change", 0)
@@ -501,22 +616,22 @@ def render_regression_table(regressions, show_config=False):
         prev_val = _format_value(reg.get("prev_value", ""))
         bad_val = _format_value(reg.get("bad_value", ""))
         tooltip = f"{prev_val} → {bad_val}"
-        config_td = f'<td>{_esc(reg.get("config", ""))}</td>' if show_config else ''
+        config_td = f"<td>{_esc(reg.get('config', ''))}</td>" if show_config else ""
         rows += (
-            f'<tr>'
-            f'{config_td}'
-            f'<td>{_esc(reg.get("metric", ""))}</td>'
+            f"<tr>"
+            f"{config_td}"
+            f"<td>{_esc(reg.get('metric', ''))}</td>"
             f'<td style="{pct_cls}; cursor: help;" title="{_esc(tooltip)}">{_esc(pct_str)}</td>'
-            f'<td>{_esc(reg.get("prev_ver", ""))}</td>'
+            f"<td>{_esc(reg.get('prev_ver', ''))}</td>"
             f'<td style="color: #fbbf24;">&rarr;</td>'
-            f'<td>{_esc(reg.get("bad_ver", ""))}</td>'
-            f'</tr>'
+            f"<td>{_esc(reg.get('bad_ver', ''))}</td>"
+            f"</tr>"
         )
     st.markdown(
         f'<table class="regression-table">'
-        f'<thead><tr>{config_th}<th>Metric</th><th>Change</th>'
-        f'<th>Previous</th><th></th><th>Bad</th></tr></thead>'
-        f'<tbody>{rows}</tbody></table>',
+        f"<thead><tr>{config_th}<th>Metric</th><th>Change</th>"
+        f"<th>Previous</th><th></th><th>Bad</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>",
         unsafe_allow_html=True,
     )
 
@@ -530,18 +645,45 @@ def render_lookback(default_index=1, key_prefix=""):
         return st.text_input("Custom lookback (e.g. 45d, 10d2h)", value="30d", key=custom_key)
     return option
 
+
 def render_css():
     st.markdown(APP_CSS, unsafe_allow_html=True)
 
 
-def render_header():
+def render_header(title="Orion Newspaper", subtitle=""):
+    sub_html = f"<p>{_esc(subtitle)}</p>" if subtitle else ""
     st.markdown(
-        '<div class="newspaper-header">'
-        "<h1>Orion Newspaper</h1>"
-        "<p>Performance regression detection</p>"
-        "</div>",
+        f'<div class="newspaper-header"><h1>{_esc(title)}</h1>{sub_html}</div>',
         unsafe_allow_html=True,
     )
+
+
+def render_loading_subtitle(n_configs, n_items, item_label="metrics"):
+    """Render a muted subtitle below the progress bar during batch runs."""
+    st.markdown(
+        f'<div class="np-loading-subtitle">'
+        f"Refreshing {_esc(str(n_configs))} configs &middot; "
+        f"{_esc(str(n_items))} {_esc(item_label)} &middot; this will take a moment"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_index_selector(key_prefix: str) -> tuple[str, str]:
+    """Render an ES index preset selector under an Advanced Options expander.
+
+    Returns (benchmark_index, metadata_index) based on selection.
+    """
+    with st.expander("Advanced Options"):
+        preset_names = list(INDEX_PRESETS.keys())
+        selected = st.selectbox(
+            "ES Index Preset",
+            preset_names,
+            index=0,
+            key=f"{key_prefix}_index_preset",
+        )
+        bm, md = INDEX_PRESETS[selected]
+        return bm, md
 
 
 def render_es_status():
@@ -557,12 +699,14 @@ def render_es_status():
         st.warning("ES_SERVER env var not set")
 
 
-def render_results(return_code, full_output, temp_dir, n_metrics, run_duration, run_finished,
-                   cmd_display="", expand_key="expand_all"):
+def render_results(
+    return_code, full_output, temp_dir, n_metrics, run_duration, run_finished, cmd_display="", expand_key="expand_all"
+):
     if expand_key not in st.session_state:
         st.session_state[expand_key] = True
 
     _es_scrub = os.environ.get("ES_SERVER", "")
+
     def _scrub(text):
         return text.replace(_es_scrub, "***") if _es_scrub else text
 
@@ -589,7 +733,9 @@ def render_results(return_code, full_output, temp_dir, n_metrics, run_duration, 
 
         if run_duration is not None:
             st.markdown(
-                f'<div class="run-meta">Completed at <span class="val">{_esc(str(run_finished))}</span> in <span class="val">{_esc(format_duration(run_duration))}</span></div>',
+                f'<div class="run-meta">Completed at '
+                f'<span class="val">{_esc(str(run_finished))}</span> in '
+                f'<span class="val">{_esc(format_duration(run_duration))}</span></div>',
                 unsafe_allow_html=True,
             )
 
@@ -602,8 +748,10 @@ def render_results(return_code, full_output, temp_dir, n_metrics, run_duration, 
             f'<div class="summary-row">'
             f'<div class="summary-card"><div class="num">{total_runs}</div><div class="lbl">Runs analyzed</div></div>'
             f'<div class="summary-card"><div class="num">{n_metrics}</div><div class="lbl">Metrics</div></div>'
-            f'<div class="summary-card{reg_cls}"><div class="num">{len(regressions)}</div><div class="lbl">Regressions</div></div>'
-            f'</div>',
+            f'<div class="summary-card{reg_cls}">'
+            f'<div class="num">{len(regressions)}</div>'
+            f'<div class="lbl">Regressions</div></div>'
+            f"</div>",
             unsafe_allow_html=True,
         )
 
