@@ -12,7 +12,7 @@ spec:
     - name: latest
       from:
         kind: DockerImage
-        name: quay.io/cloud-bulldozer/orion-newspaper:latest
+        name: quay.io/msheth/orion-newspaper:v1
       importPolicy:
         scheduled: true
       referencePolicy:

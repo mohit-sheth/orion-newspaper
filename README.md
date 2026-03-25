@@ -10,14 +10,15 @@ Web UI for [cloud-bulldozer/orion](https://github.com/cloud-bulldozer/orion) —
 - Regression table sorted by severity
 
 **Newspaper** — auto-refreshing grid of monitored configs.
-- Configs grouped by category (Core with subcategories by scale, Virt, Telco, HCP)
+- Configs grouped by category (OpenShift Core with subcategories by scale, Virtualization, Telco, HCP)
 - Smart-collapse: subcategories collapsed when all pass, expanded on regression/error
+- Scale-specific lookback: configurable per node scale (med scale 30d, large scale 60d defaults)
 - Status at a glance: green (OK), yellow (regression), red (error), blue (no data)
 - Drill into any config for full results, interactive Plotly visualizations, and logs
 - Auto-refreshes every 2 hours after the first manual run
 
 **Trends** — long-term metric trends with weekly granularity.
-- View metric trends over 3, 6, or 12 months
+- View metric trends over 1–4 months
 - Data fetched in monthly chunks to keep ES queries light and fast
 - Weekly aggregation with median or mean, sorted by % change
 - Altair charts with auto-scaled Y-axis and tooltips
@@ -34,7 +35,7 @@ Web UI for [cloud-bulldozer/orion](https://github.com/cloud-bulldozer/orion) —
 - Custom Config: paste your own YAML config with syntax-highlighted editor
 - Real-time progress with metric-level updates
 
-**About** — environment info, repo links, security notes.
+**About** — environment info, page descriptions, repo links, security notes.
 
 ## Getting started
 
@@ -63,7 +64,7 @@ pages/
   trends.py             # Long-term metric trends with weekly granularity
   metrics.py            # Metric correlation matrix across configs and versions
   manual.py             # Single-config manual execute with custom YAML editor
-  about.py              # Environment info, repo links, security notes
+  about.py              # Environment info, page descriptions, repo links, security notes
 tests/
   conftest.py           # Shared test fixtures
   test_orion_runner.py  # Unit + integration tests for orion_runner.py
@@ -74,13 +75,13 @@ kustomize/              # OpenShift deployment manifests
 
 | Category | Subcategory | Configs |
 |----------|-------------|---------|
-| Core | 6 nodes (TRT payload) | cluster-density, node-density, node-density-cni, udn-l2 |
-| Core | 24 nodes (small scale) | cluster-density, node-density, node-density-cni, udn-l2, udn-l3 |
-| Core | 120 nodes (med scale) | cluster-density, node-density, node-density-cni, udn-l2 |
-| Core | 252 nodes (large scale) | cluster-density, node-density, node-density-cni, udn-l2 |
-| Virt | — | metal-perfscale-cpt-virt-density |
-| Telco | — | trt-external-payload-node-density |
-| HCP | — | trt-external-payload-node-density |
+| OpenShift Core | TRT Payload (6 nodes) | cluster-density, node-density, node-density-cni, udn-l2 |
+| OpenShift Core | Small Scale (24 nodes) | cluster-density, node-density, node-density-cni, udn-l2, udn-l3 |
+| OpenShift Core | Med Scale (120 nodes) | cluster-density, node-density, node-density-cni, udn-l2 |
+| OpenShift Core | Large Scale (252 nodes) | cluster-density, node-density, node-density-cni, udn-l2 |
+| OpenShift Virtualization | — | metal-perfscale-cpt-virt-density |
+| OpenShift Telco | — | trt-external-payload-node-density |
+| Hosted Control Planes | — | trt-external-payload-node-density |
 
 Categories are defined in `shared_rendering.py` (`CATEGORIES` list).
 
@@ -103,6 +104,6 @@ make clean        # remove container + temp files
 - All user-influenced values are HTML-escaped before rendering
 - Path traversal protection on config file resolution
 - ES index presets (no free-form index input on batch pages)
-- Non-root container (UID 1001)
+- Non-root container (UID 1001), privilege escalation blocked, all capabilities dropped
 - Default run command binds host port to `127.0.0.1` — no external exposure
 - For OpenShift: injected via K8s Secret, ClusterIP only (no Route)

@@ -33,10 +33,8 @@ categories = filtered_categories(set(discover_configs()))
 # --- Session state ---
 if "mc_results" not in st.session_state:
     st.session_state["mc_results"] = {}
-if "mc_is_running" not in st.session_state:
-    st.session_state["mc_is_running"] = False
-else:
-    st.session_state["mc_is_running"] = False
+# Reset stale flag — if we're here, no run is active (page just loaded)
+st.session_state["mc_is_running"] = False
 if "mc_selected_cell" not in st.session_state:
     st.session_state["mc_selected_cell"] = None
 

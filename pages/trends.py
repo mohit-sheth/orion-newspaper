@@ -31,10 +31,8 @@ render_header("Trends", "Long-term metric trends with weekly granularity")
 # --- Session state ---
 if "tr_trend_data" not in st.session_state:
     st.session_state["tr_trend_data"] = None
-if "tr_is_running" not in st.session_state:
-    st.session_state["tr_is_running"] = False
-else:
-    st.session_state["tr_is_running"] = False
+# Reset stale flag — if we're here, no run is active (page just loaded)
+st.session_state["tr_is_running"] = False
 if "tr_run_meta" not in st.session_state:
     st.session_state["tr_run_meta"] = {}
 
@@ -52,8 +50,8 @@ with st.sidebar:
     version = st.selectbox("OCP Version", OCP_VERSIONS, index=OCP_VERSION_DEFAULT_INDEX, key="tr_version")
 
     time_range = st.selectbox("Time Range", TREND_TIMERANGES, index=1, key="tr_range")
-    months_map = {"3 months": 3, "6 months": 6, "12 months": 12}
-    months_back = months_map.get(time_range, 6)
+    months_map = {"1 month": 1, "2 months": 2, "3 months": 3, "4 months": 4}
+    months_back = months_map.get(time_range, 2)
 
     # Metric selection from config YAML
     all_metrics = get_config_metrics(config_name) if config_name else {}

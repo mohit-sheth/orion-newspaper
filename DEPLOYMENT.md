@@ -6,7 +6,7 @@
 podman run -d --name orion-newspaper \
   -p 127.0.0.1:8501:8501 \
   -e "ES_SERVER=$ES_SERVER" \
-  quay.io/msheth/orion-newspaper:latest
+  quay.io/msheth/orion-newspaper:v1
 ```
 
 Open http://localhost:8501

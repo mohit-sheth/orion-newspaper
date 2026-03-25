@@ -14,6 +14,8 @@ from orion_runner import (
     parse_csv_data,
 )
 from shared_rendering import (
+    INDEX_PRESETS,
+    LOOKBACK_OPTIONS,
     OCP_VERSION_DEFAULT_INDEX,
     OCP_VERSIONS,
     _all_configs_for_category,
@@ -24,7 +26,6 @@ from shared_rendering import (
     render_css,
     render_es_status,
     render_header,
-    render_index_selector,
     render_loading_subtitle,
     render_lookback,
     render_results,
@@ -43,11 +44,8 @@ if "np_results" not in st.session_state:
     st.session_state["np_results"] = {}
 if "np_selected_config" not in st.session_state:
     st.session_state["np_selected_config"] = None
-if "np_is_running" not in st.session_state:
-    st.session_state["np_is_running"] = False
-else:
-    # Reset stale flag — if we're here, no run is active (page just loaded)
-    st.session_state["np_is_running"] = False
+# Reset stale flag — if we're here, no run is active (page just loaded)
+st.session_state["np_is_running"] = False
 if "np_last_poll_time" not in st.session_state:
     st.session_state["np_last_poll_time"] = 0
 
@@ -60,7 +58,23 @@ with st.sidebar:
 
     version = st.selectbox("OCP Version", OCP_VERSIONS, index=OCP_VERSION_DEFAULT_INDEX, key="np_version")
     lookback = render_lookback(default_index=0, key_prefix="np")
-    benchmark_index, metadata_index = render_index_selector("np")
+    with st.expander("Advanced Options"):
+        preset_names = list(INDEX_PRESETS.keys())
+        selected_preset = st.selectbox("ES Index Preset", preset_names, index=0, key="np_index_preset")
+        benchmark_index, metadata_index = INDEX_PRESETS[selected_preset]
+        st.markdown("**Scale-specific lookback**")
+        lookback_med = st.selectbox(
+            "Med Scale",
+            LOOKBACK_OPTIONS[:-1],
+            index=2,
+            key="np_lookback_med",
+        )
+        lookback_large = st.selectbox(
+            "Large Scale",
+            LOOKBACK_OPTIONS[:-1],
+            index=3,
+            key="np_lookback_large",
+        )
 
     render_es_status()
 
@@ -81,7 +95,16 @@ with st.sidebar:
 
 
 # --- Run all monitored configs ---
-def _run_all(monitored_configs, version, lookback, benchmark_index, metadata_index):
+def _get_lookback(config_name, lookback, lookback_med, lookback_large):
+    """Return the appropriate lookback for a config based on its scale prefix."""
+    if config_name.startswith("med-scale-"):
+        return lookback_med
+    if config_name.startswith("large-scale-"):
+        return lookback_large
+    return lookback
+
+
+def _run_all(monitored_configs, version, lookback, lookback_med, lookback_large, benchmark_index, metadata_index):
     if not os.environ.get("ES_SERVER"):
         st.error("ES_SERVER env var not set")
         return
@@ -133,10 +156,11 @@ def _run_all(monitored_configs, version, lookback, benchmark_index, metadata_ind
 
         prev_dir = results.get(config_name, {}).get("temp_dir")
         tracker = _ProgressTracker(overall, display, pos, total_metrics, metrics_done)
+        cfg_lookback = _get_lookback(config_name, lookback, lookback_med, lookback_large)
         result = execute_config(
             config_name,
             version,
-            lookback,
+            cfg_lookback,
             benchmark_index=benchmark_index,
             metadata_index=metadata_index,
             status_tracker=tracker,
@@ -171,7 +195,7 @@ if st.session_state["np_last_poll_time"] > 0 and all_monitored:
         auto_trigger = True
 
 if (refresh_clicked or auto_trigger) and all_monitored and not st.session_state["np_is_running"]:
-    _run_all(all_monitored, version, lookback, benchmark_index, metadata_index)
+    _run_all(all_monitored, version, lookback, lookback_med, lookback_large, benchmark_index, metadata_index)
     st.rerun()
 
 

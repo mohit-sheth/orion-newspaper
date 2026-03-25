@@ -17,6 +17,26 @@ orion_version = "installed" if os.path.isfile(ORION_BIN) else "not found"
 # --- Config count ---
 configs = discover_configs()
 
+st.markdown("### Pages")
+st.markdown(
+    "| Page | Description |\n"
+    "|---|---|\n"
+    "| **Executive Summary** | Aggregated regression view — overall health badge, "
+    "pass/regression/error counts, category breakdown, and regression table sorted by severity |\n"
+    "| **Newspaper** | Auto-refreshing grid of all monitored configs grouped by category and node scale. "
+    "Smart-collapse: subcategories collapse when all pass, expand on regression. "
+    "Drill into any config for Plotly visualizations and logs. Auto-refreshes every 2 hours |\n"
+    "| **Trends** | Long-term metric trends with weekly granularity. "
+    "Fetches data in monthly chunks to keep ES queries light, aggregates into weekly data points "
+    "with median or mean. Sorted by % change with color-coded cards |\n"
+    "| **Metric Correlation** | Cross-config regression confidence. "
+    "Select a metric and multiple OCP versions to see a correlation matrix. "
+    "If multiple configs regress on the same metric, it is likely a real issue |\n"
+    "| **Manual Execute** | Full control over a single analysis run — "
+    "pick any config, algorithm, lookback, OCP version, UUID comparison, "
+    "custom YAML config editor, real-time progress |"
+)
+
 st.markdown("### Environment")
 st.markdown(
     f"| Setting | Value |\n"
@@ -39,36 +59,28 @@ st.markdown(
     "| Orion | [cloud-bulldozer/orion](https://github.com/cloud-bulldozer/orion) |"
 )
 
-st.markdown("### Newspaper defaults")
+st.markdown("### Categories")
 st.markdown(
-    "The Newspaper page monitors configs across categories with subcategories by node scale. "
-    "Each config runs with **hunter-analyze** algorithm. "
-    "Auto-refreshes every **2 hours**."
-)
-st.markdown(
-    "| Category | Description |\n"
-    "|---|---|\n"
-    "| Core | Cluster density, node density, CNI, UDN — grouped by 6/24/120/252 nodes |\n"
-    "| Virt | Virtualization workloads |\n"
-    "| Telco | Telco-specific workloads |\n"
-    "| HCP | Hosted Control Plane workloads |"
-)
-
-st.markdown("### Manual Execute")
-st.markdown(
-    "The Manual Execute page lets you run any available config with full control over:\n"
-    "- Algorithm (hunter-analyze, anomaly-detection, cmr, filter)\n"
-    "- Lookback period\n"
-    "- OCP version\n"
-    "- Base UUID / Baseline comparison\n"
-    "- Sippy PR search\n"
-    "- Debug logging"
+    "| Category | Subcategory | Configs |\n"
+    "|---|---|---|\n"
+    "| OpenShift Core | TRT Payload (6 nodes) | cluster-density, node-density, node-density-cni, udn-l2 |\n"
+    "| OpenShift Core | Small Scale (24 nodes) | cluster-density, node-density, node-density-cni, udn-l2, udn-l3 |\n"
+    "| OpenShift Core | Med Scale (120 nodes) | cluster-density, node-density, node-density-cni, udn-l2 |\n"
+    "| OpenShift Core | Large Scale (252 nodes) | cluster-density, node-density, node-density-cni, udn-l2 |\n"
+    "| OpenShift Virtualization | — | metal-perfscale-cpt-virt-density |\n"
+    "| OpenShift Telco | — | trt-external-payload-node-density |\n"
+    "| Hosted Control Planes | — | trt-external-payload-node-density |"
 )
 
 st.markdown("### Security")
 st.markdown(
     "- ES_SERVER is passed at runtime via environment variable — **never baked into the image**\n"
-    "- ES_SERVER is scrubbed from all UI output (shown as `***`)\n"
+    "- ES_SERVER is scrubbed from all UI output and subprocess output at capture point\n"
     "- The subprocess receives a minimal environment (PATH, HOME, ES_SERVER, index vars)\n"
-    "- Default run command binds host port to `127.0.0.1` — no external exposure"
+    "- All user-influenced values are HTML-escaped before rendering\n"
+    "- Path traversal protection on config file resolution\n"
+    "- ES index presets (no free-form index input on batch pages)\n"
+    "- Non-root container (UID 1001), privilege escalation blocked, all capabilities dropped\n"
+    "- Default run command binds host port to `127.0.0.1` — no external exposure\n"
+    "- For OpenShift: injected via K8s Secret, ClusterIP only (no Route)"
 )

@@ -8,7 +8,7 @@ from orion_runner import extract_regressions_json, find_viz_html, parse_csv_data
 
 APP_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Lora:wght@700&display=swap');
 
 .stMarkdown, .stText, p, span:not([data-testid="stIconMaterial"]), label, h1, h2, h3, h4, h5, h6,
 div, button, input, select, textarea, .stSelectbox, .stTextInput, .stButton {
@@ -18,8 +18,24 @@ code, pre, .stCode, .stCodeBlock {
     font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
 }
 
-/* Sidebar sizing */
+/* Sidebar branding */
+section[data-testid="stSidebar"] > div:first-child::before {
+    content: "📰 Orion Newspaper";
+    display: block;
+    font-family: 'Lora', 'Georgia', serif;
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: #f0f0f5;
+    letter-spacing: -0.02em;
+    padding: 1.2rem 1rem 0.8rem 1rem;
+    border-bottom: 1px solid #2a2a3a;
+    margin-bottom: 0.5rem;
+}
+
+/* Sidebar */
 section[data-testid="stSidebar"] {
+    background-color: #141420;
+    border-right: 1px solid #2a2a3a;
     font-size: 1.5rem !important;
     min-width: 420px !important;
     width: 420px !important;
@@ -32,6 +48,11 @@ section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] p,
 section[data-testid="stSidebar"] span {
     font-size: 1.4rem !important;
+}
+section[data-testid="stSidebar"] .stSelectbox label,
+section[data-testid="stSidebar"] .stTextInput label,
+section[data-testid="stSidebar"] .stCheckbox label {
+    color: #b0b0c0; font-weight: 500; letter-spacing: 0.01em;
 }
 section[data-testid="stSidebar"] div[data-baseweb="select"] {
     font-size: 1.1rem !important;
@@ -48,13 +69,6 @@ section[data-testid="stSidebar"] small {
 
 /* Use full width of main area */
 .stMainBlockContainer { max-width: 100%; padding-left: 2rem; padding-right: 2rem; }
-
-section[data-testid="stSidebar"] { background-color: #141420; border-right: 1px solid #2a2a3a; }
-section[data-testid="stSidebar"] .stSelectbox label,
-section[data-testid="stSidebar"] .stTextInput label,
-section[data-testid="stSidebar"] .stCheckbox label {
-    color: #b0b0c0; font-weight: 500; letter-spacing: 0.01em;
-}
 
 /* Modern dropdowns */
 div[data-baseweb="select"] > div {
@@ -451,7 +465,7 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 OCP_VERSIONS = ["4.18", "4.19", "4.20", "4.21", "4.22", "4.23", "5.0"]
 OCP_VERSION_DEFAULT_INDEX = 4
 LOOKBACK_OPTIONS = ["7d", "15d", "30d", "60d", "Custom"]
-TREND_TIMERANGES = ["3 months", "6 months", "12 months"]
+TREND_TIMERANGES = ["1 month", "2 months", "3 months", "4 months"]
 
 INDEX_PRESETS = {
     "Default": ("ripsaw-kube-burner-*", "perf_scale_ci*"),
@@ -460,10 +474,10 @@ INDEX_PRESETS = {
 
 CATEGORIES = [
     {
-        "name": "Core",
+        "name": "OpenShift Core",
         "subcategories": [
             {
-                "name": "6 nodes (TRT payload)",
+                "name": "6 Nodes — TRT Payload",
                 "prefix": "trt-external-payload-",
                 "configs": [
                     "trt-external-payload-cluster-density.yaml",
@@ -473,7 +487,7 @@ CATEGORIES = [
                 ],
             },
             {
-                "name": "24 nodes (small scale)",
+                "name": "24 Nodes — Small Scale",
                 "prefix": "small-scale-",
                 "configs": [
                     "small-scale-cluster-density.yaml",
@@ -484,7 +498,7 @@ CATEGORIES = [
                 ],
             },
             {
-                "name": "120 nodes (med scale)",
+                "name": "120 Nodes — Med Scale",
                 "prefix": "med-scale-",
                 "configs": [
                     "med-scale-cluster-density.yaml",
@@ -494,7 +508,7 @@ CATEGORIES = [
                 ],
             },
             {
-                "name": "252 nodes (large scale)",
+                "name": "252 Nodes — Large Scale",
                 "prefix": "large-scale-",
                 "configs": [
                     "large-scale-cluster-density.yaml",
@@ -505,9 +519,9 @@ CATEGORIES = [
             },
         ],
     },
-    {"name": "Virt", "configs": ["metal-perfscale-cpt-virt-density.yaml"]},
-    {"name": "Telco", "configs": ["trt-external-payload-node-density.yaml"]},
-    {"name": "HCP", "configs": ["trt-external-payload-node-density.yaml"]},
+    {"name": "OpenShift Virtualization", "configs": ["metal-perfscale-cpt-virt-density.yaml"]},
+    {"name": "OpenShift Telco", "configs": ["trt-external-payload-node-density.yaml"]},
+    {"name": "Hosted Control Planes", "configs": ["trt-external-payload-node-density.yaml"]},
 ]
 
 
