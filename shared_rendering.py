@@ -519,9 +519,30 @@ CATEGORIES = [
             },
         ],
     },
-    {"name": "OpenShift Virtualization", "configs": ["metal-perfscale-cpt-virt-density.yaml"]},
-    {"name": "OpenShift Telco", "configs": ["trt-external-payload-node-density.yaml"]},
-    {"name": "Hosted Control Planes", "configs": ["trt-external-payload-node-density.yaml"]},
+    {
+        "name": "OpenShift Virtualization",
+        "configs": [
+            "metal-perfscale-cpt-virt-density.yaml",
+            "trt-external-payload-node-density.yaml",
+            "trt-external-payload-cluster-density.yaml",
+        ],
+    },
+    {
+        "name": "OpenShift Telco",
+        "configs": [
+            "trt-external-payload-node-density.yaml",
+            "trt-external-payload-node-density-cni.yaml",
+            "trt-external-payload-udn-l2.yaml",
+        ],
+    },
+    {
+        "name": "Hosted Control Planes",
+        "configs": [
+            "trt-external-payload-node-density.yaml",
+            "trt-external-payload-cluster-density.yaml",
+            "trt-external-payload-udn-l2.yaml",
+        ],
+    },
 ]
 
 

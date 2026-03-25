@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: orion-newspaper
+  namespace: orion-newspaper
+  labels:
+    app.kubernetes.io/instance: orion-newspaper
+spec:
+  to:
+    kind: Service
+    name: orion-newspaper
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
