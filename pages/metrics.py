@@ -51,7 +51,7 @@ with st.sidebar:
     metric_names = sorted(metrics_index.keys())
 
     if not metric_names:
-        st.warning("No metrics found in this category's configs.")
+        st.warning("No metrics found in this category's configs.", icon=":material/warning:")
         st.stop()
 
     selected_metric = st.selectbox("Metric", metric_names, key="mc_metric")
@@ -75,7 +75,7 @@ with st.sidebar:
     st.divider()
     es_server = os.environ.get("ES_SERVER", "")
     if not es_server:
-        st.error("ES_SERVER is not set. Analyze is disabled.")
+        st.error("ES_SERVER is not set. Analyze is disabled.", icon=":material/error:")
     analyze_clicked = st.button(
         "Analyze",
         type="primary",

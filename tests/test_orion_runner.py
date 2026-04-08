@@ -167,6 +167,10 @@ def test_extract_regressions_json(tmp_path):
             "ocpVersion": "4.18",
             "is_changepoint": True,
             "metrics": {"podReadyLatency": {"value": 105.0, "percentage_change": 31.25}},
+            "prs": [
+                "https://github.com/openshift/origin/pull/30852",
+                "https://github.com/openshift/installer/pull/10343",
+            ],
         },
         {
             "ocpVersion": "4.19",
@@ -185,6 +189,8 @@ def test_extract_regressions_json(tmp_path):
     assert result[0]["bad_value"] == 105.0
     assert result[0]["prev_ver"] == "4.17"
     assert result[0]["bad_ver"] == "4.18"
+    assert len(result[0]["prs"]) == 2
+    assert "openshift/origin/pull/30852" in result[0]["prs"][0]
 
 
 def test_extract_regressions_json_multiple_metrics(tmp_path):

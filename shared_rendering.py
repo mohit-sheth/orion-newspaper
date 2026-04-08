@@ -1,4 +1,5 @@
 import os
+import re
 from html import escape as _esc
 
 import streamlit as st
@@ -6,17 +7,22 @@ import streamlit.components.v1 as components
 
 from orion_runner import extract_regressions_json, find_viz_html, parse_csv_data
 
+_GITHUB_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" '
+    'fill="#6c6c80" style="vertical-align:middle;margin-right:8px;">'
+    '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 '
+    "0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15"
+    "-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51"
+    "-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 "
+    "0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 "
+    "2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 "
+    '3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 '
+    '0 0016 8c0-4.42-3.58-8-8-8z"/></svg>'
+)
+
 APP_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Lora:wght@700&display=swap');
-
-.stMarkdown, .stText, p, span:not([data-testid="stIconMaterial"]), label, h1, h2, h3, h4, h5, h6,
-div, button, input, select, textarea, .stSelectbox, .stTextInput, .stButton {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-code, pre, .stCode, .stCodeBlock {
-    font-family: 'JetBrains Mono', 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
-}
+@import url('https://fonts.googleapis.com/css2?family=Lora:wght@700&display=swap');
 
 /* Sidebar branding */
 section[data-testid="stSidebar"] > div:first-child::before {
@@ -34,72 +40,22 @@ section[data-testid="stSidebar"] > div:first-child::before {
 
 /* Sidebar */
 section[data-testid="stSidebar"] {
-    background-color: #141420;
-    border-right: 1px solid #2a2a3a;
-    font-size: 1.5rem !important;
-    min-width: 420px !important;
-    width: 420px !important;
+    min-width: 380px !important;
+    width: 380px !important;
+}
+section[data-testid="stSidebar"] * {
+    font-size: 1.1rem !important;
 }
 section[data-testid="stSidebar"] h2 {
-    font-size: 2.1rem !important;
-    font-weight: 700 !important;
-}
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] span {
-    font-size: 1.4rem !important;
-}
-section[data-testid="stSidebar"] .stSelectbox label,
-section[data-testid="stSidebar"] .stTextInput label,
-section[data-testid="stSidebar"] .stCheckbox label {
-    color: #b0b0c0; font-weight: 500; letter-spacing: 0.01em;
-}
-section[data-testid="stSidebar"] div[data-baseweb="select"] {
-    font-size: 1.1rem !important;
-}
-section[data-testid="stSidebar"] input {
-    font-size: 1.1rem !important;
+    font-size: 1.8rem !important;
 }
 section[data-testid="stSidebar"] button {
-    font-size: 1.5rem !important;
-}
-section[data-testid="stSidebar"] small {
-    font-size: 1.1rem !important;
+    font-size: 1.2rem !important;
 }
 
 /* Use full width of main area */
 .stMainBlockContainer { max-width: 100%; padding-left: 2rem; padding-right: 2rem; }
 
-/* Modern dropdowns */
-div[data-baseweb="select"] > div {
-    background-color: #1a1a28;
-    border: 1px solid #2a2a3a;
-    border-radius: 8px;
-    cursor: pointer;
-}
-div[data-baseweb="select"] > div:focus-within {
-    border-color: #6C63FF;
-    box-shadow: 0 0 0 1px #6C63FF;
-}
-div[data-baseweb="popover"] ul {
-    background-color: #1a1a28;
-    border: 1px solid #2a2a3a;
-    border-radius: 8px;
-    padding: 4px;
-    max-height: 300px;
-}
-div[data-baseweb="popover"] li {
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 0.85rem;
-}
-div[data-baseweb="popover"] li:hover {
-    background-color: #2a2a3a;
-}
-div[data-baseweb="popover"] li[aria-selected="true"] {
-    background-color: #6C63FF22;
-    color: #a9a4ff;
-}
 
 .newspaper-header {
     padding: 0.8rem 0 0.6rem 0;
@@ -177,7 +133,7 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 .regression-table td {
     color: #e0e0ed;
     font-family: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', monospace;
-    font-size: 0.8rem;
+    font-size: 1rem;
     font-weight: 500;
     padding: 0.6rem 0.8rem;
     border-bottom: 1px solid #1e1e2a;
@@ -225,7 +181,7 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
     padding: 2.5rem 3rem;
     text-align: left;
     margin: 2rem 0;
-    animation: shimmer 4s ease-in-out infinite;
+    animation: shimmer 4s ease-in-out 3;
 }
 
 .welcome-card .badge {
@@ -432,6 +388,56 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 .mc-confidence-low { color: #4ade80; }
 
 /* Trend charts */
+/* PR links in regression table */
+.pr-row td {
+    border-left: none !important;
+    border-bottom: 1px solid #1e1e2a !important;
+    padding: 0.4rem 1rem 0.6rem 2rem !important;
+    background: linear-gradient(135deg, #13131d, #161625) !important;
+}
+.pr-row details {
+    background: #1a1a2a;
+    border: 1px solid #2a2a3a;
+    border-radius: 8px;
+    padding: 0.5rem 0.8rem;
+}
+.pr-row summary {
+    color: #6c6c80;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+    padding: 0.2rem 0;
+    transition: color 0.2s;
+}
+.pr-row summary:hover { color: #b0aaff; }
+.pr-row summary::-webkit-details-marker { display: none; }
+.pr-row details[open] {
+    padding-bottom: 0.5rem;
+}
+.pr-row details[open] summary {
+    margin-bottom: 0.4rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid #2a2a3a;
+}
+.pr-row a {
+    color: #a9a4ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    text-decoration: none;
+    display: block;
+    padding: 0.2rem 0;
+    transition: color 0.15s;
+}
+.pr-row a::before {
+    content: "• ";
+    color: #6c6c80;
+}
+.pr-row a:hover {
+    color: #d0cbff;
+    text-decoration: underline;
+}
+
 .trend-card {
     background: #13131d;
     border: 1px solid #2a2a3a;
@@ -463,7 +469,7 @@ div[data-baseweb="popover"] li[aria-selected="true"] {
 """
 
 OCP_VERSIONS = ["4.18", "4.19", "4.20", "4.21", "4.22", "4.23", "5.0"]
-OCP_VERSION_DEFAULT_INDEX = 4
+OCP_VERSION_DEFAULT_INDEX = len(OCP_VERSIONS) - 2
 LOOKBACK_OPTIONS = ["7d", "15d", "30d", "60d", "Custom"]
 TREND_TIMERANGES = ["1 month", "2 months", "3 months", "4 months"]
 
@@ -638,11 +644,21 @@ def _format_value(v):
     return str(v) if v != "" else "?"
 
 
+def _format_pr_url(url: str) -> str:
+    """Convert a full GitHub PR URL to a short display label."""
+    # https://github.com/openshift/origin/pull/30852 -> openshift/origin#30852
+    m = re.match(r"https?://github\.com/([^/]+/[^/]+)/pull/(\d+)", url)
+    if m:
+        return f"{m.group(1)}#{m.group(2)}"
+    return url
+
+
 def render_regression_table(regressions, show_config=False):
     """Render regressions as an aligned table. Set show_config=True for executive summary."""
     if not regressions:
         return
     config_th = "<th>Config</th>" if show_config else ""
+    col_count = 7 if show_config else 6
     rows = ""
     for reg in regressions:
         pct = reg.get("percentage_change", 0)
@@ -662,6 +678,16 @@ def render_regression_table(regressions, show_config=False):
             f"<td>{_esc(reg.get('bad_ver', ''))}</td>"
             f"</tr>"
         )
+        # Expandable PR row
+        prs = reg.get("prs", [])
+        if prs:
+            pr_links = "".join(f'<a href="{_esc(url)}" target="_blank">{_esc(_format_pr_url(url))}</a>' for url in prs)
+            rows += (
+                f'<tr class="pr-row">'
+                f'<td colspan="{col_count}">'
+                f"<details><summary>{_GITHUB_SVG}{len(prs)} PRs in diff</summary>"
+                f"{pr_links}</details></td></tr>"
+            )
     st.markdown(
         f'<table class="regression-table">'
         f"<thead><tr>{config_th}<th>Metric</th><th>Change</th>"
@@ -709,7 +735,7 @@ def render_index_selector(key_prefix: str) -> tuple[str, str]:
 
     Returns (benchmark_index, metadata_index) based on selection.
     """
-    with st.expander("Advanced Options"):
+    with st.expander("Advanced Options", icon=":material/tune:"):
         preset_names = list(INDEX_PRESETS.keys())
         selected = st.selectbox(
             "ES Index Preset",
@@ -731,7 +757,7 @@ def render_es_status():
             unsafe_allow_html=True,
         )
     else:
-        st.warning("ES_SERVER env var not set")
+        st.warning("ES_SERVER env var not set", icon=":material/warning:")
 
 
 def render_results(
@@ -746,7 +772,7 @@ def render_results(
         return text.replace(_es_scrub, "***") if _es_scrub else text
 
     if cmd_display:
-        with st.expander("Command", expanded=False):
+        with st.expander("Command", expanded=False, icon=":material/terminal:"):
             st.code(cmd_display, language="bash")
 
     tab_results, tab_logs = st.tabs(["Results", "Logs"])
@@ -791,12 +817,12 @@ def render_results(
         )
 
         if regressions:
-            with st.expander("Regressions", expanded=expand):
+            with st.expander("Regressions", expanded=expand, icon=":material/warning:"):
                 render_regression_table(regressions)
 
         viz_files = find_viz_html(temp_dir) if temp_dir else []
         if viz_files:
-            with st.expander("Visualizations", expanded=expand):
+            with st.expander("Visualizations", expanded=expand, icon=":material/bar_chart:"):
                 for viz_file in viz_files:
                     viz_name = os.path.basename(viz_file).replace("_viz.html", "")
                     st.markdown(f"**{_esc(viz_name)}**")
@@ -807,13 +833,16 @@ def render_results(
                     components.html(html_content, height=height, scrolling=True)
 
         if csv_results:
-            with st.expander("Data", expanded=expand):
+            with st.expander("Data", expanded=expand, icon=":material/table_chart:"):
                 for name, df in csv_results:
                     st.markdown(f"**{_esc(name)}**")
                     st.dataframe(df, use_container_width=True, height=400)
 
         if not csv_results and not viz_files:
-            st.info("No data files or visualizations were generated. Check the Logs tab for details.")
+            st.info(
+                "No data files or visualizations were generated. Check the Logs tab for details.",
+                icon=":material/info:",
+            )
 
     with tab_logs:
         if full_output:

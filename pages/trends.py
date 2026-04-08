@@ -69,7 +69,7 @@ with st.sidebar:
     st.divider()
     es_server = os.environ.get("ES_SERVER", "")
     if not es_server:
-        st.error("ES_SERVER is not set. Analyze is disabled.")
+        st.error("ES_SERVER is not set. Analyze is disabled.", icon=":material/error:")
     analyze_clicked = st.button(
         "Analyze",
         type="primary",
@@ -201,7 +201,7 @@ if trend_df is not None and not trend_df.empty:
             expander_label = f":green[{metric}  —  {pct_str}]"
         else:
             expander_label = f":gray[{metric}  —  {pct_str}]"
-        with st.expander(expander_label, expanded=False):
+        with st.expander(expander_label, expanded=abs(pct_diff) > 5):
             st.markdown(
                 f'<div class="trend-card {card_cls}">'
                 f'<div class="trend-meta">'
@@ -231,16 +231,16 @@ if trend_df is not None and not trend_df.empty:
 
     # Run density
     if "n_runs" in trend_df.columns:
-        with st.expander("Run density per week"):
+        with st.expander("Run density per week", icon=":material/bar_chart:"):
             density_df = trend_df[["week_start", "n_runs"]].set_index("week_start")
             st.bar_chart(density_df["n_runs"])
 
     # Data table
-    with st.expander("Weekly data"):
+    with st.expander("Weekly data", icon=":material/table_chart:"):
         st.dataframe(trend_df, use_container_width=True)
 
 elif trend_df is not None and trend_df.empty:
-    st.warning("No data found for the selected config, version, and time range.")
+    st.warning("No data found for the selected config, version, and time range.", icon=":material/warning:")
 
 else:
     n_configs = len(configs)

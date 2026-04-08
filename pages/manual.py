@@ -103,7 +103,7 @@ with st.sidebar:
     st.divider()
     es_server = os.environ.get("ES_SERVER", "")
     if not es_server:
-        st.error("ES_SERVER is not set. Execute is disabled.")
+        st.error("ES_SERVER is not set. Execute is disabled.", icon=":material/error:")
     col_exec, col_clear = st.columns([2, 1])
     with col_exec:
         execute_clicked = st.button(
@@ -112,7 +112,7 @@ with st.sidebar:
     with col_clear:
         clear_clicked = st.button("Clear", use_container_width=True)
 
-    with st.expander("Advanced Options"):
+    with st.expander("Advanced Options", icon=":material/tune:"):
         algorithm = st.selectbox("Algorithm", ["hunter-analyze", "anomaly-detection", "cmr", "filter"], index=0)
         preset_names = list(INDEX_PRESETS.keys())
         selected_preset = st.selectbox("ES Index Preset", preset_names, index=0, key="manual_index_preset")
@@ -121,7 +121,7 @@ with st.sidebar:
         baseline_input = st.text_input("Baseline UUID(s)", value="")
         display_input = st.text_input("Display fields", value="buildUrl")
         debug = st.checkbox("Debug logging", value=False)
-        sippy_pr_search = st.checkbox("Sippy PR search", value=False)
+        sippy_pr_search = st.checkbox("Sippy PR search", value=True)
 
 # --- Custom config editor ---
 if is_custom:
@@ -155,17 +155,17 @@ if clear_clicked:
 # --- Execute ---
 if execute_clicked:
     if not config_name:
-        st.error("Please select a config file.")
+        st.error("Please select a config file.", icon=":material/error:")
         st.stop()
     if not es_server:
-        st.error("ES Server is required. Set the ES_SERVER env var.")
+        st.error("ES Server is required. Set the ES_SERVER env var.", icon=":material/error:")
         st.stop()
 
     # Resolve config path
     if is_custom:
         custom_yaml = st.session_state.get("custom_yaml_content", "").strip()
         if not custom_yaml:
-            st.error("Custom config is empty. Paste a valid YAML config.")
+            st.error("Custom config is empty. Paste a valid YAML config.", icon=":material/error:")
             st.stop()
         # Clean up previous custom config file
         if st.session_state.custom_config_path and os.path.exists(st.session_state.custom_config_path):

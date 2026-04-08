@@ -10,3 +10,4 @@ orion_run_*
 .pytest_cache/
 .coverage
 htmlcov/
+SKILL.md

@@ -408,6 +408,7 @@ def extract_regressions_json(temp_dir: str) -> list[dict[str, Any]]:
                             "bad_value": bad_value,
                             "prev_ver": str(prev_ver),
                             "bad_ver": str(bad_ver),
+                            "prs": entry.get("prs", []),
                         }
                     )
             prev_entry = entry
@@ -503,7 +504,7 @@ def execute_config(
         "metadata_index": metadata_index or os.environ.get("es_metadata_index", DEFAULT_METADATA_INDEX),
         "node_count": False,
         "debug": False,
-        "sippy_pr_search": False,
+        "sippy_pr_search": True,
         "temp_dir": temp_dir,
     }
 

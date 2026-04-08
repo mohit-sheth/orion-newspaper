@@ -4,10 +4,44 @@ port = 8501
 address = "127.0.0.1"
 
 [theme]
+base = "dark"
 primaryColor = "#6C63FF"
 backgroundColor = "#0F0F13"
 secondaryBackgroundColor = "#1A1A24"
+codeBackgroundColor = "#16161f"
 textColor = "#E8E8ED"
+linkColor = "#8b83ff"
+borderColor = "#2a2a3a"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "8px"
+buttonRadius = "8px"
+
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 15
+codeFontSize = "0.875rem"
+headingFontSizes = ["32px", "24px", "20px", "16px", "14px", "12px"]
+headingFontWeights = [700, 700, 600, 600, 500, 500]
+linkUnderline = false
+
+chartCategoricalColors = ["#6C63FF", "#4ade80", "#fbbf24", "#f87171", "#60a5fa", "#8b83ff", "#a78bfa"]
+
+redColor = "#f87171"
+orangeColor = "#fbbf24"
+yellowColor = "#fbbf24"
+greenColor = "#4ade80"
+blueColor = "#60a5fa"
+violetColor = "#8b83ff"
+grayColor = "#6c6c80"
+
+[theme.sidebar]
+backgroundColor = "#141420"
+secondaryBackgroundColor = "#1a1a2e"
+codeBackgroundColor = "#16161f"
+textColor = "#E8E8ED"
+borderColor = "#2a2a3a"
 
 [client]
 toolbarMode = "minimal"

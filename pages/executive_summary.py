@@ -66,7 +66,8 @@ st.markdown(
     f'<div class="summary-row">'
     f'<div class="summary-card"><div class="num">{ok_count}/{total_configs}</div><div class="lbl">Pass</div></div>'
     f'<div class="summary-card{reg_cls}">'
-    f'<div class="num">{regression_count}</div><div class="lbl">Regressions</div></div>'
+    f'<div class="num">{len(all_regressions)}</div>'
+    f'<div class="lbl">Regressions ({regression_count} configs)</div></div>'
     f'<div class="summary-card{err_cls}"><div class="num">{error_count}</div><div class="lbl">Errors</div></div>'
     f"</div>",
     unsafe_allow_html=True,
@@ -106,4 +107,4 @@ if all_regressions:
     st.subheader("Regressions by Severity")
     render_regression_table(all_regressions, show_config=True)
 else:
-    st.success("No regressions detected across any configs.")
+    st.success("No regressions detected across any configs.", icon=":material/check_circle:")

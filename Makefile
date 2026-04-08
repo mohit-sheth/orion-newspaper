@@ -1,14 +1,24 @@
-.PHONY: run test lint build push clean stop
+.PHONY: install run test lint build push clean stop
 
 IMAGE ?= quay.io/msheth/orion-newspaper
 TAG ?= latest
 
-run:
-	# TODO: Switch back to cloud-bulldozer/orion once add-configs-med-large is merged
-	# Original: git clone https://github.com/cloud-bulldozer/orion.git /tmp/orion
+PYTHON ?= python3.11
+ORION_REPO ?= https://github.com/cloud-bulldozer/orion.git
+ORION_BRANCH ?= main
+
+install:
+	@echo "Creating virtual environment..."
+	@$(PYTHON) -m venv venv
+	@echo "Installing dependencies..."
+	@./venv/bin/pip install -r requirements.txt --quiet
 	@rm -rf /tmp/orion
 	@echo "Cloning orion repo..."
-	@git clone -b add-configs-med-large https://github.com/mohit-sheth/orion.git /tmp/orion
+	@git clone -b '$(ORION_BRANCH)' '$(ORION_REPO)' /tmp/orion
+	@echo "Installing orion CLI into venv..."
+	@./venv/bin/pip install /tmp/orion --quiet
+
+run:
 	@echo "Starting locally..."
 	ORION_DIR=$$(pwd)/venv ORION_EXAMPLES_DIR=/tmp/orion/examples \
 		./venv/bin/streamlit run app.py --server.headless true --server.port 8501 --server.address 127.0.0.1

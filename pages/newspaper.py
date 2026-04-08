@@ -58,7 +58,7 @@ with st.sidebar:
 
     version = st.selectbox("OCP Version", OCP_VERSIONS, index=OCP_VERSION_DEFAULT_INDEX, key="np_version")
     lookback = render_lookback(default_index=0, key_prefix="np")
-    with st.expander("Advanced Options"):
+    with st.expander("Advanced Options", icon=":material/tune:"):
         preset_names = list(INDEX_PRESETS.keys())
         selected_preset = st.selectbox("ES Index Preset", preset_names, index=0, key="np_index_preset")
         benchmark_index, metadata_index = INDEX_PRESETS[selected_preset]
@@ -81,7 +81,7 @@ with st.sidebar:
     st.divider()
     es_server = os.environ.get("ES_SERVER", "")
     if not es_server:
-        st.error("ES_SERVER is not set. Refresh is disabled.")
+        st.error("ES_SERVER is not set. Refresh is disabled.", icon=":material/error:")
     refresh_clicked = st.button(
         "Refresh Now",
         type="primary",
@@ -91,7 +91,7 @@ with st.sidebar:
 
     last_poll = st.session_state["np_last_poll_time"]
     if last_poll > 0:
-        st.caption(f"Last refresh: {datetime.fromtimestamp(last_poll).strftime('%H:%M:%S')}")
+        st.caption(f"Last refresh: {datetime.fromtimestamp(last_poll).strftime('%b %d, %H:%M:%S')}")
 
 
 # --- Run all monitored configs ---
@@ -106,7 +106,7 @@ def _get_lookback(config_name, lookback, lookback_med, lookback_large):
 
 def _run_all(monitored_configs, version, lookback, lookback_med, lookback_large, benchmark_index, metadata_index):
     if not os.environ.get("ES_SERVER"):
-        st.error("ES_SERVER env var not set")
+        st.error("ES_SERVER env var not set", icon=":material/error:")
         return
 
     st.session_state["np_is_running"] = True
@@ -291,7 +291,7 @@ if selected and selected in st.session_state["np_results"]:
 # --- Grid view ---
 else:
     if not all_monitored:
-        st.info("No configs available.")
+        st.info("No configs available.", icon=":material/info:")
     elif not st.session_state["np_results"]:
         cat_sections = ""
         for cat in categories:
@@ -335,7 +335,12 @@ else:
                             continue
                         prefix = sub.get("prefix", "")
                         has_issues = any(results.get(cfg, {}).get("return_code") in (2, -1) for cfg in sub["configs"])
-                        with st.expander(f":orange[{sub['name']}]", expanded=has_issues):
+                        sub_ok = sum(1 for c in sub["configs"] if results.get(c, {}).get("return_code") == 0)
+                        sub_total = len(sub["configs"])
+                        sub_status = (
+                            f"{sub_ok}/{sub_total} Pass" if not has_issues else f":red[{sub_total - sub_ok} issues]"
+                        )
+                        with st.expander(f":orange[{sub['name']}] — {sub_status}", expanded=has_issues):
                             for row_start in range(0, len(sub["configs"]), cols_per_row):
                                 row_configs = sub["configs"][row_start : row_start + cols_per_row]
                                 cols = st.columns(cols_per_row)
